@@ -368,13 +368,16 @@ export default function OrdersPage() {
               {items.map((it, i) => {
                 const price = productMap.get(it.product_id) ?? 0
                 return (
-                  <div key={i} className="flex items-center gap-2">
+                  <div
+                    key={i}
+                    className="flex flex-col gap-2.5 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-center sm:gap-3 sm:rounded-none sm:border-0 sm:bg-transparent sm:p-0"
+                  >
                     <select
                       value={it.product_id}
                       onChange={(e) =>
                         updateItem(i, { product_id: e.target.value })
                       }
-                      className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                      className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
                     >
                       <option value="">Producto…</option>
                       {products?.map((p) => (
@@ -383,32 +386,43 @@ export default function OrdersPage() {
                         </option>
                       ))}
                     </select>
-                    <TextInput
-                      type="number"
-                      min="1"
-                      value={it.quantity}
-                      onChange={(e) =>
-                        updateItem(i, {
-                          quantity: Math.max(1, Number(e.target.value) || 1),
-                        })
-                      }
-                      className="w-20"
-                    />
-                    <span className="w-24 shrink-0 text-right text-sm font-medium text-slate-600">
-                      {formatMoney(price * it.quantity)}
-                    </span>
-                    {items.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setItems((l) => l.filter((_, idx) => idx !== i))
-                        }
-                        className="shrink-0 rounded-lg px-2 text-slate-400 hover:bg-slate-100 hover:text-red-600"
-                        aria-label="Quitar producto"
-                      >
-                        ✕
-                      </button>
-                    )}
+
+                    <div className="flex items-center justify-between gap-3 sm:justify-end">
+                      <label className="flex items-center gap-2">
+                        <span className="text-sm text-slate-500 sm:sr-only">
+                          Cantidad
+                        </span>
+                        <TextInput
+                          type="number"
+                          min="1"
+                          inputMode="numeric"
+                          value={it.quantity}
+                          onChange={(e) =>
+                            updateItem(i, {
+                              quantity: Math.max(1, Number(e.target.value) || 1),
+                            })
+                          }
+                          className="w-20 bg-white text-center"
+                        />
+                      </label>
+                      <div className="flex items-center gap-1">
+                        <span className="text-base font-semibold text-slate-800 sm:w-24 sm:text-right sm:text-sm sm:font-medium">
+                          {formatMoney(price * it.quantity)}
+                        </span>
+                        {items.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setItems((l) => l.filter((_, idx) => idx !== i))
+                            }
+                            className="shrink-0 rounded-lg px-2 py-2 text-slate-400 hover:bg-slate-100 hover:text-red-600"
+                            aria-label="Quitar producto"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 )
               })}

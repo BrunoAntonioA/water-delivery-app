@@ -18,6 +18,7 @@ export interface Company {
 
 export type ModuleKey =
   | 'pedidos'
+  | 'reportes'
   | 'rutas'
   | 'clientes'
   | 'productos'
@@ -27,8 +28,8 @@ export type ModuleKey =
 // Qué módulos puede ver cada rol.
 export const ROLE_MODULES: Record<Role, ModuleKey[]> = {
   superadmin: ['empresas'],
-  admin: ['pedidos', 'rutas', 'clientes', 'productos', 'usuarios'],
-  operador: ['pedidos', 'clientes', 'productos'],
+  admin: ['pedidos', 'reportes', 'rutas', 'clientes', 'productos', 'usuarios'],
+  operador: ['pedidos', 'reportes', 'clientes', 'productos'],
   repartidor: ['rutas'],
 }
 

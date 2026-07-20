@@ -6,6 +6,7 @@ import { Button, Spinner } from './components/ui'
 import ClientsPage from './pages/ClientsPage'
 import ProductsPage from './pages/ProductsPage'
 import OrdersPage from './pages/OrdersPage'
+import OrdersReportPage from './pages/OrdersReportPage'
 import RoutesPage from './pages/RoutesPage'
 import RouteDetailPage from './pages/RouteDetailPage'
 import UsersPage from './pages/UsersPage'
@@ -13,10 +14,11 @@ import CompaniesPage from './pages/CompaniesPage'
 import LoginPage from './pages/LoginPage'
 
 const NAV: { module: ModuleKey; to: string; label: string; icon: string }[] = [
-  { module: 'pedidos', to: '/pedidos', label: 'Pedidos', icon: '📦' },
   { module: 'rutas', to: '/rutas', label: 'Rutas', icon: '🚚' },
+  { module: 'pedidos', to: '/pedidos', label: 'Pedidos', icon: '📦' },
   { module: 'clientes', to: '/clientes', label: 'Clientes', icon: '👥' },
   { module: 'productos', to: '/productos', label: 'Productos', icon: '💧' },
+  { module: 'reportes', to: '/reportes', label: 'Reportes', icon: '📊' },
   { module: 'usuarios', to: '/usuarios', label: 'Usuarios', icon: '🔑' },
   { module: 'empresas', to: '/empresas', label: 'Empresas', icon: '🏢' },
 ]
@@ -81,7 +83,7 @@ export default function App() {
   const home = navItems[0]?.to ?? '/pedidos'
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen overflow-x-clip">
       <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/90 backdrop-blur">
         <div className="mx-auto flex max-w-5xl items-center gap-4 px-4 py-3">
           <div className="flex items-center gap-2 font-bold text-slate-900">
@@ -90,27 +92,27 @@ export default function App() {
           </div>
 
           {/* Navegación en escritorio */}
-          <nav className="hidden gap-1 md:flex">
+          <nav className="hidden gap-1 lg:flex">
             {navItems.map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}
                 className={({ isActive }) =>
-                  `rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+                  `flex shrink-0 items-center gap-1 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
                     isActive
                       ? 'bg-sky-100 text-sky-700'
                       : 'text-slate-600 hover:bg-slate-100'
                   }`
                 }
               >
-                <span className="mr-1">{item.icon}</span>
+                <span>{item.icon}</span>
                 {item.label}
               </NavLink>
             ))}
           </nav>
 
           {/* Usuario + salir en escritorio */}
-          <div className="ml-auto hidden items-center gap-3 text-sm md:flex">
+          <div className="ml-auto hidden items-center gap-3 text-sm lg:flex">
             <div className="text-right">
               <p className="font-medium text-slate-700">
                 {company?.name ?? 'Superadmin'}
@@ -129,7 +131,7 @@ export default function App() {
           <button
             type="button"
             onClick={() => setMenuOpen((o) => !o)}
-            className="ml-auto rounded-lg p-2 text-slate-600 hover:bg-slate-100 md:hidden"
+            className="ml-auto rounded-lg p-2 text-slate-600 hover:bg-slate-100 lg:hidden"
             aria-label="Menú"
             aria-expanded={menuOpen}
           >
@@ -155,7 +157,7 @@ export default function App() {
 
         {/* Panel desplegable en móvil */}
         {menuOpen && (
-          <div className="border-t border-slate-100 px-4 py-3 md:hidden">
+          <div className="border-t border-slate-100 px-4 py-3 lg:hidden">
             <div className="mb-3">
               <p className="font-medium text-slate-700">
                 {company?.name ?? 'Superadmin'}
@@ -203,6 +205,14 @@ export default function App() {
             element={
               <Protected module="pedidos" home={home}>
                 <OrdersPage />
+              </Protected>
+            }
+          />
+          <Route
+            path="/reportes"
+            element={
+              <Protected module="reportes" home={home}>
+                <OrdersReportPage />
               </Protected>
             }
           />

@@ -33,6 +33,23 @@ import { OrderActions } from '../components/OrderActions'
 import { StatusBadge } from '../components/StatusBadge'
 import { Button, Card, EmptyState, Spinner } from '../components/ui'
 
+// true en pantallas de teléfono (< 640px). Sirve para mostrar tarjetas en vez
+// de tabla y evitar el scroll horizontal.
+function useIsMobile(): boolean {
+  const query = '(max-width: 639px)'
+  const [isMobile, setIsMobile] = useState(
+    typeof window !== 'undefined' && window.matchMedia(query).matches
+  )
+  useEffect(() => {
+    const mq = window.matchMedia(query)
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches)
+    mq.addEventListener('change', handler)
+    setIsMobile(mq.matches)
+    return () => mq.removeEventListener('change', handler)
+  }, [])
+  return isMobile
+}
+
 function stopAddress(stop: RouteStopWithOrder): string {
   const a = stop.order?.address
   if (!a) return '—'
@@ -51,6 +68,7 @@ export default function RouteDetailPage() {
   const { profile } = useAuth()
   const isRepartidor = profile?.role === 'repartidor'
   const canManage = !isRepartidor // el repartidor sólo reordena y entrega
+  const isMobile = useIsMobile()
 
   const { data: route, isLoading } = useQuery({
     queryKey: ['route', id],
@@ -141,11 +159,15 @@ export default function RouteDetailPage() {
           <h1 className="text-2xl font-bold text-slate-900">
             {route.name || 'Ruta sin nombre'}
           </h1>
-          <p className="text-sm text-slate-500 first-letter:uppercase">
-            📅 {formatDateOnly(route.route_date)}
+          <p className="flex items-center gap-2 text-sm text-slate-500">
+            <span aria-hidden>📅</span>
+            <span className="first-letter:uppercase">
+              {formatDateOnly(route.route_date)}
+            </span>
           </p>
-          <p className="text-sm text-slate-500">
-            🚚 {route.driverName || 'Sin repartidor'}
+          <p className="flex items-center gap-2 text-sm text-slate-500">
+            <span aria-hidden>🚚</span>
+            <span>{route.driverName || 'Sin repartidor'}</span>
           </p>
           {route.notes && (
             <p className="mt-1 text-sm italic text-slate-500">
@@ -169,7 +191,8 @@ export default function RouteDetailPage() {
           {/* --- Por entregar (arrastrable) --- */}
           <section>
             <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-slate-500">
-              📦 Por entregar
+              <span aria-hidden>📦</span>
+              <span>Por entregar</span>
               <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
                 {pending.length}
               </span>
@@ -177,41 +200,55 @@ export default function RouteDetailPage() {
             {pending.length === 0 ? (
               <EmptyState>¡Todo entregado! No quedan pedidos pendientes.</EmptyState>
             ) : (
-              <Card className="overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <StopsTableHead sortable />
-                    <DndContext
-                      sensors={sensors}
-                      collisionDetection={closestCenter}
-                      onDragEnd={onDragEnd}
-                    >
-                      <SortableContext
-                        items={pending.map((s) => s.id)}
-                        strategy={verticalListSortingStrategy}
-                      >
-                        <tbody>
-                          {pending.map((stop, index) => (
-                            <SortableStopRow
-                              key={stop.id}
-                              stop={stop}
-                              index={index}
-                              canManage={canManage}
-                              onChanged={invalidateRoute}
-                              onRemove={() => removeMutation.mutate(stop.id)}
-                            />
-                          ))}
-                        </tbody>
-                      </SortableContext>
-                    </DndContext>
-                  </table>
-                </div>
-              </Card>
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={onDragEnd}
+              >
+                <SortableContext
+                  items={pending.map((s) => s.id)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {isMobile ? (
+                    <div className="space-y-2">
+                      {pending.map((stop, index) => (
+                        <SortableStopCard
+                          key={stop.id}
+                          stop={stop}
+                          index={index}
+                          canManage={canManage}
+                          onChanged={invalidateRoute}
+                          onRemove={() => removeMutation.mutate(stop.id)}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <Card className="overflow-hidden">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <StopsTableHead sortable />
+                          <tbody>
+                            {pending.map((stop, index) => (
+                              <SortableStopRow
+                                key={stop.id}
+                                stop={stop}
+                                index={index}
+                                canManage={canManage}
+                                onChanged={invalidateRoute}
+                                onRemove={() => removeMutation.mutate(stop.id)}
+                              />
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </Card>
+                  )}
+                </SortableContext>
+              </DndContext>
             )}
             {pending.length > 0 && (
               <p className="mt-2 text-xs text-slate-400">
-                Arrastra una fila por el icono ⠿ para cambiar el orden de
-                entrega.
+                Arrastra por el icono ⠿ para cambiar el orden de entrega.
               </p>
             )}
           </section>
@@ -220,29 +257,44 @@ export default function RouteDetailPage() {
           {done.length > 0 && (
             <section>
               <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-slate-500">
-                ✅ Entregados
+                <span aria-hidden>✅</span>
+                <span>Entregados</span>
                 <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-800">
                   {done.length}
                 </span>
               </h2>
-              <Card className="overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <StopsTableHead />
-                    <tbody>
-                      {done.map((stop) => (
-                        <StaticStopRow
-                          key={stop.id}
-                          stop={stop}
-                          canManage={canManage}
-                          onChanged={invalidateRoute}
-                          onRemove={() => removeMutation.mutate(stop.id)}
-                        />
-                      ))}
-                    </tbody>
-                  </table>
+              {isMobile ? (
+                <div className="space-y-2">
+                  {done.map((stop) => (
+                    <StaticStopCard
+                      key={stop.id}
+                      stop={stop}
+                      canManage={canManage}
+                      onChanged={invalidateRoute}
+                      onRemove={() => removeMutation.mutate(stop.id)}
+                    />
+                  ))}
                 </div>
-              </Card>
+              ) : (
+                <Card className="overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <StopsTableHead />
+                      <tbody>
+                        {done.map((stop) => (
+                          <StaticStopRow
+                            key={stop.id}
+                            stop={stop}
+                            canManage={canManage}
+                            onChanged={invalidateRoute}
+                            onRemove={() => removeMutation.mutate(stop.id)}
+                          />
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </Card>
+              )}
             </section>
           )}
         </div>
@@ -409,6 +461,149 @@ function StaticStopRow({
         onRemove={onRemove}
       />
     </tr>
+  )
+}
+
+// ---- Tarjetas para la vista de teléfono ----
+
+/** Contenido común de una tarjeta de parada (info + total + acciones). */
+function StopCardInner({
+  stop,
+  canManage,
+  onChanged,
+  onRemove,
+  leading,
+  orderNo,
+}: {
+  stop: RouteStopWithOrder
+  canManage: boolean
+  onChanged: () => void
+  onRemove: () => void
+  leading: React.ReactNode
+  orderNo?: number
+}) {
+  const order = stop.order
+  const clientName = order?.client
+    ? `${order.client.name} ${order.client.surname}`
+    : 'Pedido'
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+      <div className="flex items-start gap-2">
+        <div className="mt-0.5 shrink-0">{leading}</div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-semibold text-slate-800">
+              {orderNo != null && (
+                <span className="mr-1 text-slate-400">{orderNo}.</span>
+              )}
+              {clientName}
+            </span>
+            {order && <StatusBadge status={order.status} />}
+          </div>
+          <p className="mt-1 flex items-start gap-2 text-sm text-slate-600">
+            <span aria-hidden>📍</span>
+            <span className="min-w-0 break-words">{stopAddress(stop)}</span>
+          </p>
+          {order?.client?.phone && (
+            <p className="mt-0.5 flex items-center gap-2 text-sm text-slate-500">
+              <span aria-hidden>📞</span>
+              <span>{order.client.phone}</span>
+            </p>
+          )}
+        </div>
+        {canManage && (
+          <button
+            type="button"
+            onClick={onRemove}
+            aria-label="Quitar de la ruta"
+            className="shrink-0 rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100 hover:text-red-600"
+          >
+            ✕
+          </button>
+        )}
+      </div>
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2">
+        <span className="font-bold text-slate-900">
+          {order ? formatMoney(order.total) : '—'}
+        </span>
+        {order && (
+          <OrderActions
+            order={order}
+            onChanged={onChanged}
+            className="flex flex-wrap justify-end gap-1"
+          />
+        )}
+      </div>
+    </div>
+  )
+}
+
+function SortableStopCard({
+  stop,
+  index,
+  canManage,
+  onChanged,
+  onRemove,
+}: {
+  stop: RouteStopWithOrder
+  index: number
+  canManage: boolean
+  onChanged: () => void
+  onRemove: () => void
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: stop.id })
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  }
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={isDragging ? 'opacity-80' : ''}
+    >
+      <StopCardInner
+        stop={stop}
+        canManage={canManage}
+        onChanged={onChanged}
+        onRemove={onRemove}
+        orderNo={index + 1}
+        leading={
+          <button
+            type="button"
+            {...attributes}
+            {...listeners}
+            aria-label="Arrastrar"
+            className="cursor-grab touch-none text-lg leading-none text-slate-400 hover:text-slate-600 active:cursor-grabbing"
+          >
+            ⠿
+          </button>
+        }
+      />
+    </div>
+  )
+}
+
+function StaticStopCard({
+  stop,
+  canManage,
+  onChanged,
+  onRemove,
+}: {
+  stop: RouteStopWithOrder
+  canManage: boolean
+  onChanged: () => void
+  onRemove: () => void
+}) {
+  return (
+    <StopCardInner
+      stop={stop}
+      canManage={canManage}
+      onChanged={onChanged}
+      onRemove={onRemove}
+      leading={<span className="text-lg leading-none text-emerald-500">✓</span>}
+    />
   )
 }
 
