@@ -141,7 +141,7 @@ export default function RouteDetailPage() {
           <h1 className="text-2xl font-bold text-slate-900">
             {route.name || 'Ruta sin nombre'}
           </h1>
-          <p className="text-sm capitalize text-slate-500">
+          <p className="text-sm text-slate-500 first-letter:uppercase">
             📅 {formatDateOnly(route.route_date)}
           </p>
           <p className="text-sm text-slate-500">

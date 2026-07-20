@@ -126,7 +126,7 @@ export default function RoutesPage() {
             setDateFilter(e.target.value)
             setPage(1)
           }}
-          className="w-auto"
+          className="w-full sm:w-auto"
         />
         {dateFilter && (
           <Button
@@ -157,7 +157,7 @@ export default function RoutesPage() {
           <div className="grid gap-3">
             {pageItems.map((r) => (
               <Card key={r.id} className="p-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <Link to={`/rutas/${r.id}`} className="min-w-0 flex-1 group">
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="font-semibold text-slate-900 group-hover:text-sky-700">
@@ -165,10 +165,10 @@ export default function RoutesPage() {
                       </p>
                       <RouteStatusBadge route={r} />
                     </div>
-                    <p className="text-sm capitalize text-slate-500">
+                    <p className="mt-0.5 text-sm text-slate-500 first-letter:uppercase">
                       📅 {formatDateOnly(r.route_date)}
                     </p>
-                    <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500">
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-sm text-slate-500">
                       <span>🚚 {r.driverName || 'Sin repartidor'}</span>
                       <CountChip
                         label="Entregados"
@@ -182,7 +182,7 @@ export default function RoutesPage() {
                       />
                     </div>
                   </Link>
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2 sm:shrink-0 sm:justify-end">
                     {canManage && (
                       <select
                         value={r.driver_id ?? ''}
@@ -192,7 +192,7 @@ export default function RoutesPage() {
                             driverId: e.target.value || null,
                           })
                         }
-                        className="rounded-lg border border-slate-300 px-2 py-2 text-sm outline-none focus:border-sky-500"
+                        className="w-full rounded-lg border border-slate-300 px-2 py-2 text-sm outline-none focus:border-sky-500 sm:w-auto"
                         title="Asignar repartidor"
                       >
                         <option value="">Sin repartidor</option>
@@ -203,12 +203,15 @@ export default function RoutesPage() {
                         ))}
                       </select>
                     )}
-                    <Link to={`/rutas/${r.id}`}>
-                      <Button variant="secondary">Abrir</Button>
+                    <Link to={`/rutas/${r.id}`} className="flex-1 sm:flex-none">
+                      <Button variant="secondary" className="w-full">
+                        Abrir
+                      </Button>
                     </Link>
                     {canManage && (
                       <Button
                         variant="danger"
+                        className="flex-1 sm:flex-none"
                         onClick={() => {
                           if (confirm('¿Eliminar esta ruta?'))
                             deleteMutation.mutate(r.id)
@@ -242,7 +245,7 @@ export default function RoutesPage() {
           }}
           className="space-y-4"
         >
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <Label>Nombre</Label>
               <TextInput

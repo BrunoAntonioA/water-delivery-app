@@ -202,7 +202,7 @@ export default function ClientsPage() {
           }}
           className="space-y-4"
         >
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <Label>Nombre *</Label>
               <TextInput
@@ -225,7 +225,7 @@ export default function ClientsPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <Label>Identificación (opcional)</Label>
               <TextInput
@@ -275,7 +275,7 @@ export default function ClientsPage() {
                       ✕
                     </button>
                   )}
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     <TextInput
                       value={a.label}
                       onChange={(e) =>

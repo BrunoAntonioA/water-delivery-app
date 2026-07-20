@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth } from './lib/auth'
 import { canAccess, ROLE_LABELS, ROLE_MODULES, type ModuleKey } from './types/auth'
@@ -39,6 +40,7 @@ function Protected({
 
 export default function App() {
   const { session, profile, company, loading, signOut } = useAuth()
+  const [menuOpen, setMenuOpen] = useState(false)
 
   if (loading) {
     return (
@@ -81,12 +83,14 @@ export default function App() {
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/90 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-4 px-4 py-3">
+        <div className="mx-auto flex max-w-5xl items-center gap-4 px-4 py-3">
           <div className="flex items-center gap-2 font-bold text-slate-900">
             <span className="text-xl">💧</span>
             <span>AquaGestión</span>
           </div>
-          <nav className="flex flex-wrap gap-1">
+
+          {/* Navegación en escritorio */}
+          <nav className="hidden gap-1 md:flex">
             {navItems.map((item) => (
               <NavLink
                 key={item.to}
@@ -105,7 +109,8 @@ export default function App() {
             ))}
           </nav>
 
-          <div className="ml-auto flex items-center gap-3 text-sm">
+          {/* Usuario + salir en escritorio */}
+          <div className="ml-auto hidden items-center gap-3 text-sm md:flex">
             <div className="text-right">
               <p className="font-medium text-slate-700">
                 {company?.name ?? 'Superadmin'}
@@ -119,7 +124,75 @@ export default function App() {
               Salir
             </Button>
           </div>
+
+          {/* Botón de menú en móvil */}
+          <button
+            type="button"
+            onClick={() => setMenuOpen((o) => !o)}
+            className="ml-auto rounded-lg p-2 text-slate-600 hover:bg-slate-100 md:hidden"
+            aria-label="Menú"
+            aria-expanded={menuOpen}
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+              {menuOpen ? (
+                <path
+                  d="M6 6l12 12M18 6L6 18"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
+              ) : (
+                <path
+                  d="M4 7h16M4 12h16M4 17h16"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
+              )}
+            </svg>
+          </button>
         </div>
+
+        {/* Panel desplegable en móvil */}
+        {menuOpen && (
+          <div className="border-t border-slate-100 px-4 py-3 md:hidden">
+            <div className="mb-3">
+              <p className="font-medium text-slate-700">
+                {company?.name ?? 'Superadmin'}
+              </p>
+              <p className="text-xs text-slate-400">
+                {profile.full_name || profile.email} ·{' '}
+                {ROLE_LABELS[profile.role]}
+              </p>
+            </div>
+            <nav className="flex flex-col gap-1">
+              {navItems.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  onClick={() => setMenuOpen(false)}
+                  className={({ isActive }) =>
+                    `rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                      isActive
+                        ? 'bg-sky-100 text-sky-700'
+                        : 'text-slate-600 hover:bg-slate-100'
+                    }`
+                  }
+                >
+                  <span className="mr-2">{item.icon}</span>
+                  {item.label}
+                </NavLink>
+              ))}
+            </nav>
+            <Button
+              variant="secondary"
+              className="mt-3 w-full"
+              onClick={signOut}
+            >
+              Salir
+            </Button>
+          </div>
+        )}
       </header>
 
       <main className="mx-auto max-w-5xl px-4 py-8">

@@ -174,7 +174,7 @@ export default function OrdersPage() {
               setDateFilter(e.target.value)
               setPage(1)
             }}
-            className="w-auto"
+            className="w-full sm:w-auto"
           />
           <div className="flex flex-wrap gap-1">
             {STATUS_FILTERS.map((f) => (
