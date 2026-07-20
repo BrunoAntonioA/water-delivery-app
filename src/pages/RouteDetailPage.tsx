@@ -1,0 +1,435 @@
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
+import {
+  addOrderToRoute,
+  getRoute,
+  listAssignableOrders,
+  removeStop,
+  reorderStops,
+} from '../api/routes'
+import type { OrderDetail, RouteStopWithOrder } from '../types/db'
+import { formatDateOnly, formatMoney } from '../lib/format'
+import { Modal } from '../components/Modal'
+import { OrderActions } from '../components/OrderActions'
+import { StatusBadge } from '../components/StatusBadge'
+import { Button, Card, EmptyState, Spinner } from '../components/ui'
+
+function stopAddress(stop: RouteStopWithOrder): string {
+  const a = stop.order?.address
+  if (!a) return '—'
+  return [a.address, a.comuna].filter(Boolean).join(', ')
+}
+
+// Un pedido está "pendiente de entrega" si aún está en estado Pedido (o no
+// tiene pedido asociado). Ya fue entregado si está Entregado o Pagado.
+function isPending(stop: RouteStopWithOrder): boolean {
+  return !stop.order || stop.order.status === 'ordered'
+}
+
+export default function RouteDetailPage() {
+  const { id = '' } = useParams()
+  const qc = useQueryClient()
+
+  const { data: route, isLoading } = useQuery({
+    queryKey: ['route', id],
+    queryFn: () => getRoute(id),
+    enabled: Boolean(id),
+  })
+
+  const { data: assignable } = useQuery({
+    queryKey: ['assignable-orders'],
+    queryFn: listAssignableOrders,
+  })
+
+  // Copia local de las paradas para reordenar de forma instantánea (optimista).
+  const [items, setItems] = useState<RouteStopWithOrder[]>([])
+  useEffect(() => {
+    if (route?.stops) setItems(route.stops)
+  }, [route?.stops])
+
+  const [addOpen, setAddOpen] = useState(false)
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  )
+
+  const invalidateRoute = () => {
+    qc.invalidateQueries({ queryKey: ['route', id] })
+    qc.invalidateQueries({ queryKey: ['assignable-orders'] })
+    qc.invalidateQueries({ queryKey: ['routes'] })
+  }
+
+  const reorderMutation = useMutation({
+    mutationFn: (orderedIds: string[]) => reorderStops(orderedIds),
+    onError: () => invalidateRoute(), // revertir al estado real si falla
+  })
+
+  const addMutation = useMutation({
+    mutationFn: (orderId: string) => addOrderToRoute(id, orderId),
+    onSuccess: invalidateRoute,
+  })
+
+  const removeMutation = useMutation({
+    mutationFn: (stopId: string) => removeStop(stopId),
+    onSuccess: invalidateRoute,
+  })
+
+  const pending = items.filter(isPending)
+  const done = items.filter((s) => !isPending(s))
+
+  function onDragEnd(event: DragEndEvent) {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    const oldIndex = pending.findIndex((s) => s.id === active.id)
+    const newIndex = pending.findIndex((s) => s.id === over.id)
+    if (oldIndex < 0 || newIndex < 0) return
+    const newPending = arrayMove(pending, oldIndex, newIndex)
+    // Guardamos el orden completo: primero las pendientes, luego las entregadas.
+    const next = [...newPending, ...done]
+    setItems(next)
+    reorderMutation.mutate(next.map((s) => s.id))
+  }
+
+  if (isLoading) return <Spinner />
+  if (!route)
+    return (
+      <EmptyState>
+        No se encontró la ruta.{' '}
+        <Link to="/rutas" className="text-sky-600 hover:underline">
+          Volver
+        </Link>
+      </EmptyState>
+    )
+
+  return (
+    <div>
+      <Link
+        to="/rutas"
+        className="mb-4 inline-block text-sm text-sky-600 hover:underline"
+      >
+        ← Volver a rutas
+      </Link>
+
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">
+            {route.name || 'Ruta sin nombre'}
+          </h1>
+          <p className="text-sm capitalize text-slate-500">
+            📅 {formatDateOnly(route.route_date)}
+          </p>
+          {route.driver && (
+            <p className="text-sm text-slate-500">🚚 {route.driver}</p>
+          )}
+          {route.notes && (
+            <p className="mt-1 text-sm italic text-slate-500">
+              “{route.notes}”
+            </p>
+          )}
+        </div>
+        <Button onClick={() => setAddOpen(true)}>+ Agregar pedido</Button>
+      </div>
+
+      {items.length === 0 ? (
+        <EmptyState>
+          Esta ruta no tiene pedidos. Agrega el primero con “Agregar pedido”.
+        </EmptyState>
+      ) : (
+        <div className="space-y-8">
+          {/* --- Por entregar (arrastrable) --- */}
+          <section>
+            <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-slate-500">
+              📦 Por entregar
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
+                {pending.length}
+              </span>
+            </h2>
+            {pending.length === 0 ? (
+              <EmptyState>¡Todo entregado! No quedan pedidos pendientes.</EmptyState>
+            ) : (
+              <Card className="overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <StopsTableHead sortable />
+                    <DndContext
+                      sensors={sensors}
+                      collisionDetection={closestCenter}
+                      onDragEnd={onDragEnd}
+                    >
+                      <SortableContext
+                        items={pending.map((s) => s.id)}
+                        strategy={verticalListSortingStrategy}
+                      >
+                        <tbody>
+                          {pending.map((stop, index) => (
+                            <SortableStopRow
+                              key={stop.id}
+                              stop={stop}
+                              index={index}
+                              onChanged={invalidateRoute}
+                              onRemove={() => removeMutation.mutate(stop.id)}
+                            />
+                          ))}
+                        </tbody>
+                      </SortableContext>
+                    </DndContext>
+                  </table>
+                </div>
+              </Card>
+            )}
+            {pending.length > 0 && (
+              <p className="mt-2 text-xs text-slate-400">
+                Arrastra una fila por el icono ⠿ para cambiar el orden de
+                entrega.
+              </p>
+            )}
+          </section>
+
+          {/* --- Entregados (estático) --- */}
+          {done.length > 0 && (
+            <section>
+              <h2 className="mb-2 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-slate-500">
+                ✅ Entregados
+                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-800">
+                  {done.length}
+                </span>
+              </h2>
+              <Card className="overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <StopsTableHead />
+                    <tbody>
+                      {done.map((stop) => (
+                        <StaticStopRow
+                          key={stop.id}
+                          stop={stop}
+                          onChanged={invalidateRoute}
+                          onRemove={() => removeMutation.mutate(stop.id)}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            </section>
+          )}
+        </div>
+      )}
+
+      <Modal
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        title="Agregar pedido a la ruta"
+        wide
+      >
+        <AddOrderList
+          orders={assignable ?? []}
+          onAdd={(orderId) => addMutation.mutate(orderId)}
+          isPending={addMutation.isPending}
+        />
+      </Modal>
+    </div>
+  )
+}
+
+function StopsTableHead({ sortable = false }: { sortable?: boolean }) {
+  return (
+    <thead>
+      <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase text-slate-500">
+        <th className="w-8 px-2 py-2">{sortable ? '' : '✓'}</th>
+        <th className="w-8 px-2 py-2">#</th>
+        <th className="px-3 py-2">Cliente</th>
+        <th className="px-3 py-2">Dirección</th>
+        <th className="px-3 py-2">Teléfono</th>
+        <th className="px-3 py-2 text-right">Total</th>
+        <th className="px-3 py-2">Estado</th>
+        <th className="px-3 py-2">Acciones</th>
+        <th className="w-10 px-2 py-2"></th>
+      </tr>
+    </thead>
+  )
+}
+
+/** Celdas compartidas por las dos tablas (desde Cliente hasta el botón quitar). */
+function StopCells({
+  stop,
+  onChanged,
+  onRemove,
+}: {
+  stop: RouteStopWithOrder
+  onChanged: () => void
+  onRemove: () => void
+}) {
+  const order = stop.order
+  const clientName = order?.client
+    ? `${order.client.name} ${order.client.surname}`
+    : 'Pedido'
+  return (
+    <>
+      <td className="px-3 py-2 font-medium text-slate-800">{clientName}</td>
+      <td className="px-3 py-2 text-slate-600">{stopAddress(stop)}</td>
+      <td className="px-3 py-2 text-slate-600">
+        {order?.client?.phone ?? '—'}
+      </td>
+      <td className="px-3 py-2 text-right font-medium text-slate-800">
+        {order ? formatMoney(order.total) : '—'}
+      </td>
+      <td className="px-3 py-2">
+        {order && <StatusBadge status={order.status} />}
+      </td>
+      <td className="px-3 py-2">
+        {order && (
+          <OrderActions
+            order={order}
+            onChanged={onChanged}
+            className="flex flex-wrap gap-1"
+          />
+        )}
+      </td>
+      <td className="px-2 py-2 text-center">
+        <button
+          type="button"
+          onClick={onRemove}
+          className="rounded-lg px-2 text-slate-400 hover:bg-slate-100 hover:text-red-600"
+          aria-label="Quitar de la ruta"
+        >
+          ✕
+        </button>
+      </td>
+    </>
+  )
+}
+
+function SortableStopRow({
+  stop,
+  index,
+  onChanged,
+  onRemove,
+}: {
+  stop: RouteStopWithOrder
+  index: number
+  onChanged: () => void
+  onRemove: () => void
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: stop.id })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  }
+
+  return (
+    <tr
+      ref={setNodeRef}
+      style={style}
+      className={`border-b border-slate-100 ${
+        isDragging ? 'bg-sky-50 shadow-lg' : 'bg-white'
+      }`}
+    >
+      <td className="px-2 py-2 text-center">
+        <button
+          type="button"
+          className="cursor-grab touch-none text-slate-400 hover:text-slate-600 active:cursor-grabbing"
+          aria-label="Arrastrar"
+          {...attributes}
+          {...listeners}
+        >
+          ⠿
+        </button>
+      </td>
+      <td className="px-2 py-2 font-semibold text-slate-500">{index + 1}</td>
+      <StopCells stop={stop} onChanged={onChanged} onRemove={onRemove} />
+    </tr>
+  )
+}
+
+function StaticStopRow({
+  stop,
+  onChanged,
+  onRemove,
+}: {
+  stop: RouteStopWithOrder
+  onChanged: () => void
+  onRemove: () => void
+}) {
+  return (
+    <tr className="border-b border-slate-100 bg-white">
+      <td className="px-2 py-2 text-center text-emerald-500">✓</td>
+      <td className="px-2 py-2 font-semibold text-slate-400">—</td>
+      <StopCells stop={stop} onChanged={onChanged} onRemove={onRemove} />
+    </tr>
+  )
+}
+
+function AddOrderList({
+  orders,
+  onAdd,
+  isPending,
+}: {
+  orders: OrderDetail[]
+  onAdd: (orderId: string) => void
+  isPending: boolean
+}) {
+  if (orders.length === 0) {
+    return (
+      <p className="py-6 text-center text-sm text-slate-500">
+        No hay pedidos disponibles. Todos los pedidos ya están en una ruta, o
+        aún no has creado pedidos.
+      </p>
+    )
+  }
+
+  return (
+    <div className="max-h-96 space-y-2 overflow-y-auto">
+      {orders.map((o) => (
+        <div
+          key={o.id}
+          className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2"
+        >
+          <div className="min-w-0">
+            <p className="font-medium text-slate-800">
+              {o.client ? `${o.client.name} ${o.client.surname}` : 'Cliente'}
+            </p>
+            <p className="truncate text-sm text-slate-500">
+              {o.address
+                ? [o.address.address, o.address.comuna]
+                    .filter(Boolean)
+                    .join(', ')
+                : 'Sin dirección'}{' '}
+              · {formatMoney(o.total)}
+            </p>
+          </div>
+          <Button
+            variant="secondary"
+            onClick={() => onAdd(o.id)}
+            disabled={isPending}
+          >
+            Agregar
+          </Button>
+        </div>
+      ))}
+    </div>
+  )
+}
