@@ -2,8 +2,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import {
   createUser,
+  deactivateUser,
   listUsers,
-  removeUserProfile,
+  reactivateUser,
   updateUserRole,
 } from '../api/admin'
 import { useAuth } from '../lib/auth'
@@ -71,8 +72,13 @@ export default function UsersPage() {
     onSuccess: invalidate,
   })
 
-  const removeMutation = useMutation({
-    mutationFn: (id: string) => removeUserProfile(id),
+  const deactivateMutation = useMutation({
+    mutationFn: (id: string) => deactivateUser(id),
+    onSuccess: invalidate,
+  })
+
+  const reactivateMutation = useMutation({
+    mutationFn: (id: string) => reactivateUser(id),
     onSuccess: invalidate,
   })
 
@@ -101,7 +107,7 @@ export default function UsersPage() {
           {users.map((u) => {
             const isSelf = u.id === profile?.id
             return (
-              <Card key={u.id} className="p-4">
+              <Card key={u.id} className={`p-4 ${u.active ? '' : 'opacity-60'}`}>
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <p className="font-semibold text-slate-900">
@@ -109,13 +115,18 @@ export default function UsersPage() {
                       {isSelf && (
                         <span className="ml-2 text-xs text-slate-400">(tú)</span>
                       )}
+                      {!u.active && (
+                        <span className="ml-2 rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-600">
+                          Desactivado
+                        </span>
+                      )}
                     </p>
                     <p className="text-sm text-slate-500">{u.email}</p>
                   </div>
                   <div className="flex items-center gap-2">
                     <select
                       value={u.role}
-                      disabled={isSelf || roleMutation.isPending}
+                      disabled={isSelf || !u.active || roleMutation.isPending}
                       onChange={(e) =>
                         roleMutation.mutate({
                           id: u.id,
@@ -130,19 +141,27 @@ export default function UsersPage() {
                         </option>
                       ))}
                     </select>
-                    {!isSelf && (
+                    {!isSelf && u.active && (
                       <Button
                         variant="danger"
                         onClick={() => {
                           if (
                             confirm(
-                              `¿Quitar el acceso de ${u.full_name || u.email}?`
+                              `¿Desactivar a ${u.full_name || u.email}? Perderá el acceso, pero puedes reactivarlo luego.`
                             )
                           )
-                            removeMutation.mutate(u.id)
+                            deactivateMutation.mutate(u.id)
                         }}
                       >
-                        Quitar
+                        Desactivar
+                      </Button>
+                    )}
+                    {!isSelf && !u.active && (
+                      <Button
+                        variant="success"
+                        onClick={() => reactivateMutation.mutate(u.id)}
+                      >
+                        Reactivar
                       </Button>
                     )}
                   </div>

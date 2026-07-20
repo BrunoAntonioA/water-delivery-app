@@ -153,9 +153,17 @@ create table if not exists profiles (
   role       user_role not null default 'operador',
   full_name  text,
   email      text,
+  active     boolean not null default true, -- false = usuario desactivado (sin acceso)
   created_at timestamptz not null default now()
 );
 create index if not exists profiles_company_id_idx on profiles (company_id);
+alter table profiles add column if not exists active boolean not null default true;
+
+-- Repartidor asignado a la ruta (un usuario con rol 'repartidor').
+-- Se agrega aquí, ANTES de las funciones que lo usan (is_my_route), porque
+-- PostgreSQL valida el cuerpo de las funciones SQL al momento de crearlas.
+alter table routes add column if not exists driver_id uuid references profiles (id) on delete set null;
+create index if not exists routes_driver_id_idx on routes (driver_id);
 
 -- ----------------------------------------------------------------------------
 --  Funciones auxiliares (SECURITY DEFINER: leen profiles sin gatillar RLS,
@@ -163,20 +171,45 @@ create index if not exists profiles_company_id_idx on profiles (company_id);
 -- ----------------------------------------------------------------------------
 create or replace function public.current_company_id()
 returns uuid language sql stable security definer set search_path = public as $$
-  select company_id from public.profiles where id = auth.uid()
+  select company_id from public.profiles where id = auth.uid() and active
 $$;
 
 create or replace function public.is_superadmin()
 returns boolean language sql stable security definer set search_path = public as $$
   select exists (
-    select 1 from public.profiles where id = auth.uid() and role = 'superadmin'
+    select 1 from public.profiles
+    where id = auth.uid() and active and role = 'superadmin'
   )
 $$;
 
 create or replace function public.is_company_admin()
 returns boolean language sql stable security definer set search_path = public as $$
   select exists (
-    select 1 from public.profiles where id = auth.uid() and role = 'admin'
+    select 1 from public.profiles
+    where id = auth.uid() and active and role = 'admin'
+  )
+$$;
+
+create or replace function public.current_user_role()
+returns user_role language sql stable security definer set search_path = public as $$
+  select role from public.profiles where id = auth.uid() and active
+$$;
+
+-- ¿La ruta está asignada al usuario actual? (para repartidores)
+create or replace function public.is_my_route(rid uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from public.routes where id = rid and driver_id = auth.uid()
+  )
+$$;
+
+-- ¿El pedido pertenece a una ruta asignada al usuario actual?
+create or replace function public.order_in_my_route(oid uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from public.route_stops rs
+    join public.routes r on r.id = rs.route_id
+    where rs.order_id = oid and r.driver_id = auth.uid()
   )
 $$;
 
@@ -230,7 +263,7 @@ alter table route_stops enable row level security;
 alter table companies   enable row level security;
 alter table profiles    enable row level security;
 
--- Tablas de datos: acceso sólo a filas de la empresa del usuario.
+-- Tablas simples: acceso a cualquier fila de la empresa del usuario.
 do $$
 declare
   t text;
@@ -239,14 +272,60 @@ begin
   loop
     execute format('drop policy if exists "allow_all_%1$s" on %1$s;', t);       -- limpia política antigua
     execute format('drop policy if exists "tenant_%1$s" on %1$s;', t);
-    execute format(
-      'create policy "tenant_%1$s" on %1$s for all
-         using (company_id = current_company_id())
-         with check (company_id = current_company_id());',
-      t
-    );
   end loop;
 end$$;
+
+create policy "tenant_clients" on clients for all
+  using (company_id = current_company_id())
+  with check (company_id = current_company_id());
+create policy "tenant_addresses" on addresses for all
+  using (company_id = current_company_id())
+  with check (company_id = current_company_id());
+create policy "tenant_products" on products for all
+  using (company_id = current_company_id())
+  with check (company_id = current_company_id());
+
+-- Rutas: admin/operador ven todas las de la empresa; el repartidor sólo las suyas.
+create policy "tenant_routes" on routes for all
+  using (
+    company_id = current_company_id()
+    and (current_user_role() <> 'repartidor' or driver_id = auth.uid())
+  )
+  with check (
+    company_id = current_company_id()
+    and (current_user_role() <> 'repartidor' or driver_id = auth.uid())
+  );
+
+-- Paradas: el repartidor sólo ve las de sus rutas asignadas.
+create policy "tenant_route_stops" on route_stops for all
+  using (
+    company_id = current_company_id()
+    and (current_user_role() <> 'repartidor' or is_my_route(route_id))
+  )
+  with check (
+    company_id = current_company_id()
+    and (current_user_role() <> 'repartidor' or is_my_route(route_id))
+  );
+
+-- Pedidos: el repartidor sólo ve los pedidos que están en sus rutas.
+create policy "tenant_orders" on orders for all
+  using (
+    company_id = current_company_id()
+    and (current_user_role() <> 'repartidor' or order_in_my_route(id))
+  )
+  with check (
+    company_id = current_company_id()
+    and (current_user_role() <> 'repartidor' or order_in_my_route(id))
+  );
+create policy "tenant_order_items" on order_items for all
+  using (
+    company_id = current_company_id()
+    and (current_user_role() <> 'repartidor' or order_in_my_route(order_id))
+  )
+  with check (
+    company_id = current_company_id()
+    and (current_user_role() <> 'repartidor' or order_in_my_route(order_id))
+  );
 
 -- Empresas: el superadmin administra todas; cada usuario lee la suya; el admin
 -- puede renombrar la suya.

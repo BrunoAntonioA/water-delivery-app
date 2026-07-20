@@ -63,16 +63,53 @@ export interface NewUserInput {
 }
 
 /**
- * Crea un usuario: primero la cuenta de Supabase Auth (con un cliente temporal
- * para no cerrar la sesión del admin) y luego su perfil (empresa + rol).
+ * Crea un usuario: la cuenta de Auth (con un cliente temporal para no cerrar la
+ * sesión del admin) y su perfil. Si el correo ya pertenece a un usuario
+ * desactivado de la empresa, lo REACTIVA en vez de crear otra cuenta (evita el
+ * error de "rate limit" al reusar un correo).
  */
 export async function createUser(input: NewUserInput): Promise<void> {
+  const email = input.email.trim().toLowerCase()
+
+  // ¿Existe ya un perfil (posiblemente desactivado) con este correo?
+  const { data: existing } = await supabase
+    .from('profiles')
+    .select('id, active')
+    .eq('email', email)
+    .maybeSingle()
+
+  if (existing) {
+    if (existing.active) {
+      throw new Error('Ya existe un usuario activo con ese correo.')
+    }
+    // Reactivar y actualizar rol/nombre. (La contraseña sigue siendo la anterior;
+    // el usuario puede restablecerla si la olvidó.)
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        active: true,
+        role: input.role,
+        full_name: input.full_name || null,
+        company_id: input.company_id,
+      })
+      .eq('id', existing.id)
+    if (error) throw error
+    return
+  }
+
   const temp = createTempAuthClient()
   const { data, error } = await temp.auth.signUp({
-    email: input.email,
+    email,
     password: input.password,
   })
-  if (error) throw error
+  if (error) {
+    if (/already registered|already exists/i.test(error.message)) {
+      throw new Error(
+        'Ese correo ya tiene una cuenta en Supabase. Bórrala en Authentication → Users (o usa otro correo).'
+      )
+    }
+    throw error
+  }
   const userId = data.user?.id
   if (!userId) {
     throw new Error(
@@ -85,7 +122,7 @@ export async function createUser(input: NewUserInput): Promise<void> {
     company_id: input.company_id,
     role: input.role,
     full_name: input.full_name || null,
-    email: input.email,
+    email,
   })
   if (profileError) throw profileError
 }
@@ -98,12 +135,20 @@ export async function updateUserRole(id: string, role: Role): Promise<void> {
   if (error) throw error
 }
 
-/**
- * Quita el acceso de un usuario borrando su perfil. La cuenta de Auth sigue
- * existiendo (borrarla del todo requiere el panel de Supabase o un backend),
- * pero sin perfil no puede ver ningún dato.
- */
-export async function removeUserProfile(id: string): Promise<void> {
-  const { error } = await supabase.from('profiles').delete().eq('id', id)
+/** Desactiva un usuario: conserva la cuenta pero le quita todo el acceso. */
+export async function deactivateUser(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('profiles')
+    .update({ active: false })
+    .eq('id', id)
+  if (error) throw error
+}
+
+/** Reactiva un usuario desactivado. */
+export async function reactivateUser(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('profiles')
+    .update({ active: true })
+    .eq('id', id)
   if (error) throw error
 }

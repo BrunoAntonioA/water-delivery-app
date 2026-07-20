@@ -8,24 +8,52 @@ export interface RouteInput {
   name: string
   route_date: string
   driver: string
+  driver_id: string | null
   notes: string
+}
+
+export interface Driver {
+  id: string
+  full_name: string | null
+  email: string | null
+}
+
+/** Repartidores de la empresa (para asignarlos a una ruta). */
+export async function listDrivers(): Promise<Driver[]> {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, full_name, email')
+    .eq('role', 'repartidor')
+    .order('full_name', { ascending: true })
+  if (error) throw error
+  return (data ?? []) as Driver[]
 }
 
 export interface RouteSummary extends Route {
   stopCount: number
   deliveredCount: number // entregados o pagados
   paidCount: number
+  driverName: string | null
+}
+
+type DriverProfile = { full_name: string | null; email: string | null } | null
+
+function driverNameOf(p: DriverProfile, fallback: string | null): string | null {
+  return p?.full_name || p?.email || fallback
 }
 
 export async function listRoutes(): Promise<RouteSummary[]> {
   const { data, error } = await supabase
     .from('routes')
-    .select('*, stops:route_stops(id, order:orders(status))')
+    .select(
+      '*, stops:route_stops(id, order:orders(status)), driver_profile:profiles!driver_id(full_name, email)'
+    )
     .order('route_date', { ascending: false })
   if (error) throw error
   return (data ?? []).map((r) => {
-    const { stops, ...route } = r as Route & {
+    const { stops, driver_profile, ...route } = r as Route & {
       stops: { id: string; order: { status: OrderStatus } | null }[]
+      driver_profile: DriverProfile
     }
     const list = stops ?? []
     const deliveredCount = list.filter(
@@ -37,6 +65,7 @@ export async function listRoutes(): Promise<RouteSummary[]> {
       stopCount: list.length,
       deliveredCount,
       paidCount,
+      driverName: driverNameOf(driver_profile, route.driver),
     }
   })
 }
@@ -44,11 +73,17 @@ export async function listRoutes(): Promise<RouteSummary[]> {
 export async function getRoute(id: string): Promise<RouteDetail> {
   const { data, error } = await supabase
     .from('routes')
-    .select(`*, stops:route_stops(*, ${ORDER_SELECT})`)
+    .select(
+      `*, stops:route_stops(*, ${ORDER_SELECT}), driver_profile:profiles!driver_id(full_name, email)`
+    )
     .eq('id', id)
     .single()
   if (error) throw error
-  const route = data as RouteDetail
+  const { driver_profile, ...rest } = data as RouteDetail & {
+    driver_profile: DriverProfile
+  }
+  const route = rest as RouteDetail
+  route.driverName = driverNameOf(driver_profile, route.driver)
   // Ordenar las paradas por su posición.
   route.stops = [...route.stops].sort((a, b) => a.position - b.position)
   return route
@@ -61,6 +96,7 @@ export async function createRoute(input: RouteInput): Promise<string> {
       name: input.name || null,
       route_date: input.route_date,
       driver: input.driver || null,
+      driver_id: input.driver_id,
       notes: input.notes || null,
     })
     .select()
@@ -79,8 +115,21 @@ export async function updateRoute(
       name: input.name || null,
       route_date: input.route_date,
       driver: input.driver || null,
+      driver_id: input.driver_id,
       notes: input.notes || null,
     })
+    .eq('id', id)
+  if (error) throw error
+}
+
+/** Asigna (o quita) el repartidor de una ruta. */
+export async function setRouteDriver(
+  id: string,
+  driverId: string | null
+): Promise<void> {
+  const { error } = await supabase
+    .from('routes')
+    .update({ driver_id: driverId })
     .eq('id', id)
   if (error) throw error
 }

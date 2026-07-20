@@ -33,7 +33,9 @@ El frontend es 100% React; los datos, imágenes y autenticación se manejan con
   - **Superadmin** (tú): crea empresas y su administrador. Módulo *Empresas*.
   - **Admin** (por empresa): todos los módulos + gestión de usuarios de su empresa.
   - **Operador**: Pedidos, Clientes, Productos.
-  - **Repartidor**: Rutas.
+  - **Repartidor**: sólo ve **la(s) ruta(s) asignada(s) a él** (el admin lo asigna
+    en la lista de Rutas). Puede reordenar las paradas y marcar entregado/cobrar,
+    pero no agregar ni quitar pedidos de la ruta. El aislamiento lo aplica RLS.
 
 ---
 
@@ -63,9 +65,9 @@ El frontend es 100% React; los datos, imágenes y autenticación se manejan con
 
 1. **Supabase → Authentication → Providers → Email**:
    - Desactiva **"Confirm email"** (así los usuarios que crea un admin pueden
-     entrar de inmediato con la contraseña que se les asigna).
+     entrar de inmediato con su contraseña).
    - Deja **"Allow new users to sign up"** *activado* (el app crea usuarios con
-     `signUp` desde el frontend — ver nota de seguridad abajo).
+     `signUp` desde el frontend).
 2. **Crea tu usuario superadmin**: Supabase → Authentication → Users → **Add user**
    (tu email + contraseña). Copia el **UUID** del usuario.
 3. En **SQL Editor**, corre (reemplazando el UUID y tus datos):
@@ -78,12 +80,17 @@ El frontend es 100% React; los datos, imágenes y autenticación se manejan con
    **Usuarios**. Tus datos anteriores quedaron en la empresa **"Mi Empresa"**:
    créale un usuario admin para gestionarlos.
 
-> ⚠️ **Nota de seguridad (sin backend)**: como el app no tiene backend, la creación
-> de usuarios usa `signUp`, que requiere tener los registros habilitados. Sin
-> perfil (fila en `profiles`) una cuenta no puede ver ningún dato, así que el riesgo
-> es bajo, pero para cerrarlo del todo conviene mover la creación de usuarios a una
-> **Edge Function** con la *secret key* y desactivar el registro público. Podemos
-> agregar eso más adelante.
+> 🗑️ **Desactivar vs. eliminar usuarios**: "Desactivar" quita el acceso pero
+> conserva la cuenta; puedes **Reactivar**la cuando quieras (o al volver a crear un
+> usuario con el mismo correo, se reactiva). Esto evita el error de *rate limit* de
+> Supabase al reusar un correo. Para eliminar una cuenta **por completo** (y liberar
+> el correo del todo), bórrala en **Authentication → Users** del panel de Supabase.
+
+> ⚠️ **Nota de seguridad (sin backend)**: como el app es sólo frontend, crear
+> usuarios usa `signUp`, así que los registros deben quedar habilitados. Una cuenta
+> sin perfil (o desactivada) no puede ver ningún dato, por lo que el riesgo es bajo.
+> Para cerrarlo del todo se puede mover la creación a una Edge Function con la
+> secret key — opcional, más adelante.
 
 ## 3. Configurar variables de entorno
 

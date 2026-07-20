@@ -26,6 +26,7 @@ import {
   reorderStops,
 } from '../api/routes'
 import type { OrderDetail, RouteStopWithOrder } from '../types/db'
+import { useAuth } from '../lib/auth'
 import { formatDateOnly, formatMoney } from '../lib/format'
 import { Modal } from '../components/Modal'
 import { OrderActions } from '../components/OrderActions'
@@ -47,6 +48,9 @@ function isPending(stop: RouteStopWithOrder): boolean {
 export default function RouteDetailPage() {
   const { id = '' } = useParams()
   const qc = useQueryClient()
+  const { profile } = useAuth()
+  const isRepartidor = profile?.role === 'repartidor'
+  const canManage = !isRepartidor // el repartidor sólo reordena y entrega
 
   const { data: route, isLoading } = useQuery({
     queryKey: ['route', id],
@@ -57,6 +61,7 @@ export default function RouteDetailPage() {
   const { data: assignable } = useQuery({
     queryKey: ['assignable-orders'],
     queryFn: listAssignableOrders,
+    enabled: canManage,
   })
 
   // Copia local de las paradas para reordenar de forma instantánea (optimista).
@@ -139,21 +144,25 @@ export default function RouteDetailPage() {
           <p className="text-sm capitalize text-slate-500">
             📅 {formatDateOnly(route.route_date)}
           </p>
-          {route.driver && (
-            <p className="text-sm text-slate-500">🚚 {route.driver}</p>
-          )}
+          <p className="text-sm text-slate-500">
+            🚚 {route.driverName || 'Sin repartidor'}
+          </p>
           {route.notes && (
             <p className="mt-1 text-sm italic text-slate-500">
               “{route.notes}”
             </p>
           )}
         </div>
-        <Button onClick={() => setAddOpen(true)}>+ Agregar pedido</Button>
+        {canManage && (
+          <Button onClick={() => setAddOpen(true)}>+ Agregar pedido</Button>
+        )}
       </div>
 
       {items.length === 0 ? (
         <EmptyState>
-          Esta ruta no tiene pedidos. Agrega el primero con “Agregar pedido”.
+          {canManage
+            ? 'Esta ruta no tiene pedidos. Agrega el primero con “Agregar pedido”.'
+            : 'Esta ruta no tiene pedidos asignados todavía.'}
         </EmptyState>
       ) : (
         <div className="space-y-8">
@@ -187,6 +196,7 @@ export default function RouteDetailPage() {
                               key={stop.id}
                               stop={stop}
                               index={index}
+                              canManage={canManage}
                               onChanged={invalidateRoute}
                               onRemove={() => removeMutation.mutate(stop.id)}
                             />
@@ -224,6 +234,7 @@ export default function RouteDetailPage() {
                         <StaticStopRow
                           key={stop.id}
                           stop={stop}
+                          canManage={canManage}
                           onChanged={invalidateRoute}
                           onRemove={() => removeMutation.mutate(stop.id)}
                         />
@@ -274,10 +285,12 @@ function StopsTableHead({ sortable = false }: { sortable?: boolean }) {
 /** Celdas compartidas por las dos tablas (desde Cliente hasta el botón quitar). */
 function StopCells({
   stop,
+  canManage,
   onChanged,
   onRemove,
 }: {
   stop: RouteStopWithOrder
+  canManage: boolean
   onChanged: () => void
   onRemove: () => void
 }) {
@@ -308,14 +321,16 @@ function StopCells({
         )}
       </td>
       <td className="px-2 py-2 text-center">
-        <button
-          type="button"
-          onClick={onRemove}
-          className="rounded-lg px-2 text-slate-400 hover:bg-slate-100 hover:text-red-600"
-          aria-label="Quitar de la ruta"
-        >
-          ✕
-        </button>
+        {canManage && (
+          <button
+            type="button"
+            onClick={onRemove}
+            className="rounded-lg px-2 text-slate-400 hover:bg-slate-100 hover:text-red-600"
+            aria-label="Quitar de la ruta"
+          >
+            ✕
+          </button>
+        )}
       </td>
     </>
   )
@@ -324,11 +339,13 @@ function StopCells({
 function SortableStopRow({
   stop,
   index,
+  canManage,
   onChanged,
   onRemove,
 }: {
   stop: RouteStopWithOrder
   index: number
+  canManage: boolean
   onChanged: () => void
   onRemove: () => void
 }) {
@@ -360,17 +377,24 @@ function SortableStopRow({
         </button>
       </td>
       <td className="px-2 py-2 font-semibold text-slate-500">{index + 1}</td>
-      <StopCells stop={stop} onChanged={onChanged} onRemove={onRemove} />
+      <StopCells
+        stop={stop}
+        canManage={canManage}
+        onChanged={onChanged}
+        onRemove={onRemove}
+      />
     </tr>
   )
 }
 
 function StaticStopRow({
   stop,
+  canManage,
   onChanged,
   onRemove,
 }: {
   stop: RouteStopWithOrder
+  canManage: boolean
   onChanged: () => void
   onRemove: () => void
 }) {
@@ -378,7 +402,12 @@ function StaticStopRow({
     <tr className="border-b border-slate-100 bg-white">
       <td className="px-2 py-2 text-center text-emerald-500">✓</td>
       <td className="px-2 py-2 font-semibold text-slate-400">—</td>
-      <StopCells stop={stop} onChanged={onChanged} onRemove={onRemove} />
+      <StopCells
+        stop={stop}
+        canManage={canManage}
+        onChanged={onChanged}
+        onRemove={onRemove}
+      />
     </tr>
   )
 }

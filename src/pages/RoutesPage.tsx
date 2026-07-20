@@ -4,10 +4,13 @@ import { Link } from 'react-router-dom'
 import {
   createRoute,
   deleteRoute,
+  listDrivers,
   listRoutes,
+  setRouteDriver,
   type RouteInput,
   type RouteSummary,
 } from '../api/routes'
+import { useAuth } from '../lib/auth'
 import { formatDateOnly } from '../lib/format'
 import { Modal } from '../components/Modal'
 import {
@@ -32,20 +35,32 @@ function today(): string {
   return `${y}-${m}-${d}`
 }
 
+const emptyForm = (): RouteInput => ({
+  name: '',
+  route_date: today(),
+  driver: '',
+  driver_id: null,
+  notes: '',
+})
+
 export default function RoutesPage() {
   const qc = useQueryClient()
+  const { profile } = useAuth()
+  const isRepartidor = profile?.role === 'repartidor'
+  const canManage = !isRepartidor // admin gestiona rutas
+
   const { data: routes, isLoading } = useQuery({
     queryKey: ['routes'],
     queryFn: listRoutes,
   })
+  const { data: drivers } = useQuery({
+    queryKey: ['drivers'],
+    queryFn: listDrivers,
+    enabled: canManage,
+  })
 
   const [modalOpen, setModalOpen] = useState(false)
-  const [form, setForm] = useState<RouteInput>({
-    name: '',
-    route_date: today(),
-    driver: '',
-    notes: '',
-  })
+  const [form, setForm] = useState<RouteInput>(emptyForm())
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['routes'] })
 
@@ -62,8 +77,14 @@ export default function RoutesPage() {
     onSuccess: invalidate,
   })
 
+  const driverMutation = useMutation({
+    mutationFn: ({ id, driverId }: { id: string; driverId: string | null }) =>
+      setRouteDriver(id, driverId),
+    onSuccess: invalidate,
+  })
+
   function openNew() {
-    setForm({ name: '', route_date: today(), driver: '', notes: '' })
+    setForm(emptyForm())
     setModalOpen(true)
   }
 
@@ -86,8 +107,14 @@ export default function RoutesPage() {
     <div>
       <PageHeader
         title="Rutas"
-        subtitle="Organiza los pedidos por ruta de reparto y ordénalos arrastrando."
-        action={<Button onClick={openNew}>+ Nueva ruta</Button>}
+        subtitle={
+          canManage
+            ? 'Organiza los pedidos por ruta de reparto y ordénalos arrastrando.'
+            : 'Estas son las rutas asignadas a ti.'
+        }
+        action={
+          canManage ? <Button onClick={openNew}>+ Nueva ruta</Button> : undefined
+        }
       />
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -142,7 +169,7 @@ export default function RoutesPage() {
                       📅 {formatDateOnly(r.route_date)}
                     </p>
                     <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500">
-                      {r.driver && <span>🚚 {r.driver}</span>}
+                      <span>🚚 {r.driverName || 'Sin repartidor'}</span>
                       <CountChip
                         label="Entregados"
                         done={r.deliveredCount}
@@ -155,19 +182,41 @@ export default function RoutesPage() {
                       />
                     </div>
                   </Link>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {canManage && (
+                      <select
+                        value={r.driver_id ?? ''}
+                        onChange={(e) =>
+                          driverMutation.mutate({
+                            id: r.id,
+                            driverId: e.target.value || null,
+                          })
+                        }
+                        className="rounded-lg border border-slate-300 px-2 py-2 text-sm outline-none focus:border-sky-500"
+                        title="Asignar repartidor"
+                      >
+                        <option value="">Sin repartidor</option>
+                        {drivers?.map((d) => (
+                          <option key={d.id} value={d.id}>
+                            {d.full_name || d.email}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                     <Link to={`/rutas/${r.id}`}>
                       <Button variant="secondary">Abrir</Button>
                     </Link>
-                    <Button
-                      variant="danger"
-                      onClick={() => {
-                        if (confirm('¿Eliminar esta ruta?'))
-                          deleteMutation.mutate(r.id)
-                      }}
-                    >
-                      Eliminar
-                    </Button>
+                    {canManage && (
+                      <Button
+                        variant="danger"
+                        onClick={() => {
+                          if (confirm('¿Eliminar esta ruta?'))
+                            deleteMutation.mutate(r.id)
+                        }}
+                      >
+                        Eliminar
+                      </Button>
+                    )}
                   </div>
                 </div>
               </Card>
@@ -217,11 +266,25 @@ export default function RoutesPage() {
 
           <div>
             <Label>Repartidor</Label>
-            <TextInput
-              value={form.driver}
-              onChange={(e) => setForm({ ...form, driver: e.target.value })}
-              placeholder="Nombre del repartidor"
-            />
+            <select
+              value={form.driver_id ?? ''}
+              onChange={(e) =>
+                setForm({ ...form, driver_id: e.target.value || null })
+              }
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-sky-500"
+            >
+              <option value="">Sin repartidor</option>
+              {drivers?.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.full_name || d.email}
+                </option>
+              ))}
+            </select>
+            {drivers && drivers.length === 0 && (
+              <p className="mt-1 text-xs text-slate-400">
+                No tienes usuarios con rol Repartidor. Créalos en Usuarios.
+              </p>
+            )}
           </div>
 
           <div>

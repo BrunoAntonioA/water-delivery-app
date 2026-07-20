@@ -51,16 +51,20 @@ export default function App() {
   // Sin sesión → login.
   if (!session) return <LoginPage />
 
-  // Con sesión pero sin perfil → no tiene acceso asignado todavía.
-  if (!profile) {
+  // Con sesión pero sin perfil, o perfil desactivado → sin acceso.
+  // (active === false sólo cuando está explícitamente desactivado; si la columna
+  // aún no existe en la BD, no bloquea.)
+  const deactivated = profile?.active === false
+  if (!profile || deactivated) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-4 px-4 text-center">
         <div className="text-4xl">🚫</div>
         <div>
           <p className="font-semibold text-slate-900">Sin acceso</p>
           <p className="text-sm text-slate-500">
-            Tu cuenta no está asignada a ninguna empresa. Contacta a tu
-            administrador.
+            {deactivated
+              ? 'Tu cuenta está desactivada. Contacta a tu administrador.'
+              : 'Tu cuenta no está asignada a ninguna empresa. Contacta a tu administrador.'}
           </p>
         </div>
         <Button variant="secondary" onClick={signOut}>

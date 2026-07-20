@@ -73,6 +73,7 @@ export interface Route {
   name: string | null
   route_date: string
   driver: string | null
+  driver_id: string | null
   notes: string | null
   created_at: string
 }
@@ -91,4 +92,5 @@ export interface RouteStopWithOrder extends RouteStop {
 
 export interface RouteDetail extends Route {
   stops: RouteStopWithOrder[]
+  driverName?: string | null
 }
