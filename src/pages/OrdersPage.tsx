@@ -3,8 +3,9 @@ import { useMemo, useState } from 'react'
 import { createOrder, deleteOrder, listOrders, type OrderItemInput } from '../api/orders'
 import { listClients } from '../api/clients'
 import { listProducts } from '../api/products'
-import type { OrderStatus } from '../types/db'
+import type { OrderDetail, OrderStatus } from '../types/db'
 import { formatDate, formatMoney, toLocalDateStr } from '../lib/format'
+import { useIsMobile } from '../lib/useIsMobile'
 import { ClientCombobox } from '../components/ClientCombobox'
 import { Modal } from '../components/Modal'
 import { OrderActions } from '../components/OrderActions'
@@ -12,8 +13,10 @@ import { PAYMENT_LABELS, StatusBadge } from '../components/StatusBadge'
 import {
   Button,
   Card,
+  CopyButton,
   EmptyState,
   Label,
+  MapButton,
   Pagination,
   PageHeader,
   Spinner,
@@ -41,6 +44,7 @@ const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
 
 export default function OrdersPage() {
   const qc = useQueryClient()
+  const isMobile = useIsMobile()
 
   const { data: orders, isLoading } = useQuery({
     queryKey: ['orders'],
@@ -219,20 +223,20 @@ export default function OrdersPage() {
         <EmptyState>Aún no hay pedidos.</EmptyState>
       ) : filteredOrders.length === 0 ? (
         <EmptyState>No hay pedidos con esos filtros.</EmptyState>
-      ) : (
+      ) : isMobile ? (
         <>
           <div className="grid gap-3">
           {pageItems.map((o) => {
             return (
               <Card key={o.id} className="p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="font-semibold text-slate-900">
+                <div className="flex items-start gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-semibold text-slate-900">
                         {o.client
                           ? `${o.client.name} ${o.client.surname}`
                           : 'Cliente eliminado'}
-                      </p>
+                      </span>
                       <StatusBadge status={o.status} />
                     </div>
                     <p className="text-xs text-slate-400">
@@ -247,53 +251,115 @@ export default function OrdersPage() {
                       ))}
                     </ul>
                     {o.address && (
-                      <p className="mt-1 text-sm text-slate-500">
-                        📍 {o.address.address}
-                        {o.address.comuna ? `, ${o.address.comuna}` : ''}
-                        {o.address.observation
-                          ? ` (${o.address.observation})`
-                          : ''}
-                      </p>
+                      <div className="mt-1 flex items-start gap-2 text-sm text-slate-500">
+                        <span className="min-w-0 flex-1 break-words">
+                          📍 {o.address.address}
+                          {o.address.comuna ? `, ${o.address.comuna}` : ''}
+                          {o.address.observation
+                            ? ` (${o.address.observation})`
+                            : ''}
+                        </span>
+                        <CopyButton
+                          value={o.address.address}
+                          label="Copiar dirección"
+                        />
+                        <MapButton
+                          query={[o.address.address, o.address.comuna]
+                            .filter(Boolean)
+                            .join(', ')}
+                        />
+                      </div>
+                    )}
+                    {o.client?.phone && (
+                      <div className="mt-1 flex items-center gap-2 text-sm text-slate-500">
+                        <span className="flex-1">📞 {o.client.phone}</span>
+                        <CopyButton
+                          value={o.client.phone}
+                          label="Copiar teléfono"
+                        />
+                      </div>
                     )}
                     {o.notes && (
                       <p className="mt-1 text-sm italic text-slate-500">
                         “{o.notes}”
                       </p>
                     )}
-                    <p className="mt-2 font-bold text-slate-900">
-                      Total: {formatMoney(o.total)}
-                    </p>
-                    {o.status === 'paid' && o.payment_method && (
-                      <p className="mt-1 text-sm text-emerald-700">
-                        ✓ Pagado con {PAYMENT_LABELS[o.payment_method]}
-                        {o.paid_amount != null
-                          ? ` — ${formatMoney(o.paid_amount)}`
-                          : ''}
-                      </p>
-                    )}
                   </div>
 
-                  <div className="flex shrink-0 flex-col items-stretch gap-2">
-                    <OrderActions
-                      order={o}
-                      onChanged={invalidate}
-                      className="flex flex-col items-stretch gap-2"
-                    />
-                    <Button
-                      variant="ghost"
-                      onClick={() => {
-                        if (confirm('¿Eliminar este pedido?'))
-                          deleteMutation.mutate(o.id)
-                      }}
-                    >
-                      Eliminar
-                    </Button>
-                  </div>
+                  {/* Eliminar (arriba a la derecha, como en las rutas) */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (confirm('¿Eliminar este pedido?'))
+                        deleteMutation.mutate(o.id)
+                    }}
+                    aria-label="Eliminar pedido"
+                    className="shrink-0 rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100 hover:text-red-600"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div className="mt-2 border-t border-slate-100 pt-2">
+                  <p className="font-bold text-slate-900">
+                    Total: {formatMoney(o.total)}
+                  </p>
+                  {o.status === 'paid' && o.payment_method && (
+                    <p className="mt-1 text-sm text-emerald-700">
+                      ✓ Pagado con {PAYMENT_LABELS[o.payment_method]}
+                      {o.paid_amount != null
+                        ? ` — ${formatMoney(o.paid_amount)}`
+                        : ''}
+                    </p>
+                  )}
+                  <OrderActions
+                    order={o}
+                    onChanged={invalidate}
+                    className="mt-2 flex flex-wrap items-center gap-2"
+                  />
                 </div>
               </Card>
             )
           })}
           </div>
+          <Pagination
+            page={currentPage}
+            pageCount={pageCount}
+            onPage={setPage}
+          />
+        </>
+      ) : (
+        <>
+          <Card className="overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase text-slate-500">
+                    <th className="px-3 py-2">Cliente</th>
+                    <th className="px-3 py-2">Dirección</th>
+                    <th className="px-3 py-2">Teléfono</th>
+                    <th className="px-3 py-2 text-right">Total</th>
+                    <th className="px-3 py-2">Estado</th>
+                    <th className="px-3 py-2">Acciones</th>
+                    <th className="w-10 px-2 py-2"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pageItems.map((o) => (
+                    <OrderRow
+                      key={o.id}
+                      o={o}
+                      onChanged={invalidate}
+                      onDelete={() => {
+                        if (confirm('¿Eliminar este pedido?'))
+                          deleteMutation.mutate(o.id)
+                      }}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
           <Pagination
             page={currentPage}
             pageCount={pageCount}
@@ -469,5 +535,73 @@ export default function OrdersPage() {
         </form>
       </Modal>
     </div>
+  )
+}
+
+// Fila de la tabla de pedidos (vista escritorio), con el mismo estilo que las
+// paradas de una ruta: dirección con copiar/mapa, teléfono con copiar, acciones.
+function OrderRow({
+  o,
+  onChanged,
+  onDelete,
+}: {
+  o: OrderDetail
+  onChanged: () => void
+  onDelete: () => void
+}) {
+  const clientName = o.client
+    ? `${o.client.name} ${o.client.surname}`
+    : 'Cliente eliminado'
+  const addressFull = o.address
+    ? [o.address.address, o.address.comuna].filter(Boolean).join(', ')
+    : ''
+  return (
+    <tr className="border-b border-slate-100 last:border-0 [&>td]:align-middle">
+      <td className="px-3 py-2 font-medium text-slate-800">{clientName}</td>
+      <td className="px-3 py-2 text-slate-600">
+        {o.address ? (
+          <div className="flex items-center gap-1">
+            <span className="min-w-0">{addressFull}</span>
+            <CopyButton value={o.address.address} label="Copiar dirección" />
+            <MapButton query={addressFull} />
+          </div>
+        ) : (
+          '—'
+        )}
+      </td>
+      <td className="px-3 py-2 text-slate-600">
+        {o.client?.phone ? (
+          <div className="flex items-center gap-1">
+            <span>{o.client.phone}</span>
+            <CopyButton value={o.client.phone} label="Copiar teléfono" />
+          </div>
+        ) : (
+          '—'
+        )}
+      </td>
+      <td className="px-3 py-2 text-right font-medium text-slate-800">
+        {formatMoney(o.total)}
+      </td>
+      <td className="px-3 py-2">
+        <StatusBadge status={o.status} />
+      </td>
+      <td className="px-3 py-2">
+        <OrderActions
+          order={o}
+          onChanged={onChanged}
+          className="flex items-center gap-1"
+        />
+      </td>
+      <td className="px-2 py-2 text-center">
+        <button
+          type="button"
+          onClick={onDelete}
+          aria-label="Eliminar pedido"
+          className="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100 hover:text-red-600"
+        >
+          ✕
+        </button>
+      </td>
+    </tr>
   )
 }

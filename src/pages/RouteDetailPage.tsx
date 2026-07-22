@@ -27,28 +27,19 @@ import {
 } from '../api/routes'
 import type { OrderDetail, RouteStopWithOrder } from '../types/db'
 import { useAuth } from '../lib/auth'
+import { useIsMobile } from '../lib/useIsMobile'
 import { formatDateOnly, formatMoney } from '../lib/format'
 import { Modal } from '../components/Modal'
 import { OrderActions } from '../components/OrderActions'
 import { StatusBadge } from '../components/StatusBadge'
-import { Button, Card, EmptyState, Spinner } from '../components/ui'
-
-// true en pantallas de teléfono (< 640px). Sirve para mostrar tarjetas en vez
-// de tabla y evitar el scroll horizontal.
-function useIsMobile(): boolean {
-  const query = '(max-width: 639px)'
-  const [isMobile, setIsMobile] = useState(
-    typeof window !== 'undefined' && window.matchMedia(query).matches
-  )
-  useEffect(() => {
-    const mq = window.matchMedia(query)
-    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches)
-    mq.addEventListener('change', handler)
-    setIsMobile(mq.matches)
-    return () => mq.removeEventListener('change', handler)
-  }, [])
-  return isMobile
-}
+import {
+  Button,
+  Card,
+  CopyButton,
+  EmptyState,
+  MapButton,
+  Spinner,
+} from '../components/ui'
 
 function stopAddress(stop: RouteStopWithOrder): string {
   const a = stop.order?.address
@@ -354,9 +345,27 @@ function StopCells({
   return (
     <>
       <td className="px-3 py-2 font-medium text-slate-800">{clientName}</td>
-      <td className="px-3 py-2 text-slate-600">{stopAddress(stop)}</td>
       <td className="px-3 py-2 text-slate-600">
-        {order?.client?.phone ?? '—'}
+        <div className="flex items-center gap-1">
+          <span className="min-w-0">{stopAddress(stop)}</span>
+          {order?.address?.address && (
+            <>
+              <CopyButton
+                value={order.address.address}
+                label="Copiar dirección"
+              />
+              <MapButton query={stopAddress(stop)} />
+            </>
+          )}
+        </div>
+      </td>
+      <td className="px-3 py-2 text-slate-600">
+        <div className="flex items-center gap-1">
+          <span>{order?.client?.phone ?? '—'}</span>
+          {order?.client?.phone && (
+            <CopyButton value={order.client.phone} label="Copiar teléfono" />
+          )}
+        </div>
       </td>
       <td className="px-3 py-2 text-right font-medium text-slate-800">
         {order ? formatMoney(order.total) : '—'}
@@ -369,7 +378,7 @@ function StopCells({
           <OrderActions
             order={order}
             onChanged={onChanged}
-            className="flex flex-wrap gap-1"
+            className="flex items-center gap-1"
           />
         )}
       </td>
@@ -414,7 +423,7 @@ function SortableStopRow({
     <tr
       ref={setNodeRef}
       style={style}
-      className={`border-b border-slate-100 ${
+      className={`border-b border-slate-100 [&>td]:align-middle ${
         isDragging ? 'bg-sky-50 shadow-lg' : 'bg-white'
       }`}
     >
@@ -452,7 +461,7 @@ function StaticStopRow({
   onRemove: () => void
 }) {
   return (
-    <tr className="border-b border-slate-100 bg-white">
+    <tr className="border-b border-slate-100 bg-white [&>td]:align-middle">
       <td className="px-2 py-2 text-center text-emerald-500">✓</td>
       <td className="px-2 py-2 font-semibold text-slate-400">—</td>
       <StopCells
@@ -501,15 +510,25 @@ function StopCardInner({
             </span>
             {order && <StatusBadge status={order.status} />}
           </div>
-          <p className="mt-1 flex items-start gap-2 text-sm text-slate-600">
+          <div className="mt-1 flex items-start gap-2 text-sm text-slate-600">
             <span aria-hidden>📍</span>
-            <span className="min-w-0 break-words">{stopAddress(stop)}</span>
-          </p>
+            <span className="min-w-0 flex-1 break-words">{stopAddress(stop)}</span>
+            {order?.address?.address && (
+              <>
+                <CopyButton
+                  value={order.address.address}
+                  label="Copiar dirección"
+                />
+                <MapButton query={stopAddress(stop)} />
+              </>
+            )}
+          </div>
           {order?.client?.phone && (
-            <p className="mt-0.5 flex items-center gap-2 text-sm text-slate-500">
+            <div className="mt-0.5 flex items-center gap-2 text-sm text-slate-500">
               <span aria-hidden>📞</span>
-              <span>{order.client.phone}</span>
-            </p>
+              <span className="flex-1">{order.client.phone}</span>
+              <CopyButton value={order.client.phone} label="Copiar teléfono" />
+            </div>
           )}
         </div>
         {canManage && (
@@ -523,15 +542,15 @@ function StopCardInner({
           </button>
         )}
       </div>
-      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2">
-        <span className="font-bold text-slate-900">
+      <div className="mt-2 border-t border-slate-100 pt-2">
+        <p className="font-bold text-slate-900">
           {order ? formatMoney(order.total) : '—'}
-        </span>
+        </p>
         {order && (
           <OrderActions
             order={order}
             onChanged={onChanged}
-            className="flex flex-wrap justify-end gap-1"
+            className="mt-2 flex flex-wrap items-center gap-2"
           />
         )}
       </div>

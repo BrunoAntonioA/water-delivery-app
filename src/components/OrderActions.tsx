@@ -73,8 +73,13 @@ export function OrderActions({
     <>
       <div className={className}>
         {canCharge && (
-          <Button variant="success" onClick={() => setChargeOpen(true)}>
-            <WhatsAppIcon /> Cobrar
+          <Button
+            variant="success"
+            onClick={() => setChargeOpen(true)}
+            aria-label="Cobrar por WhatsApp"
+            title="Cobrar por WhatsApp"
+          >
+            <WhatsAppIcon />
           </Button>
         )}
         {order.status === 'ordered' && (
