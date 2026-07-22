@@ -71,6 +71,17 @@ create table if not exists products (
 );
 
 -- ----------------------------------------------------------------------------
+--  Plantillas de mensajes de WhatsApp (contenido con variables: {cliente},
+--  {empresa}, {total}, {detalle}, {direccion}, {telefono})
+-- ----------------------------------------------------------------------------
+create table if not exists whatsapp_templates (
+  id         uuid primary key default gen_random_uuid(),
+  name       text not null,
+  content    text not null,
+  created_at timestamptz not null default now()
+);
+
+-- ----------------------------------------------------------------------------
 --  Pedidos
 -- ----------------------------------------------------------------------------
 create table if not exists orders (
@@ -224,6 +235,7 @@ alter table orders      add column if not exists company_id uuid references comp
 alter table order_items add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
 alter table routes      add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
 alter table route_stops add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
+alter table whatsapp_templates add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
 
 -- ----------------------------------------------------------------------------
 --  Migración de datos existentes: crea una empresa inicial y asigna a ella
@@ -260,6 +272,7 @@ alter table orders      enable row level security;
 alter table order_items enable row level security;
 alter table routes      enable row level security;
 alter table route_stops enable row level security;
+alter table whatsapp_templates enable row level security;
 alter table companies   enable row level security;
 alter table profiles    enable row level security;
 
@@ -268,7 +281,7 @@ do $$
 declare
   t text;
 begin
-  foreach t in array array['clients', 'addresses', 'products', 'orders', 'order_items', 'routes', 'route_stops']
+  foreach t in array array['clients', 'addresses', 'products', 'whatsapp_templates', 'orders', 'order_items', 'routes', 'route_stops']
   loop
     execute format('drop policy if exists "allow_all_%1$s" on %1$s;', t);       -- limpia política antigua
     execute format('drop policy if exists "tenant_%1$s" on %1$s;', t);
@@ -282,6 +295,9 @@ create policy "tenant_addresses" on addresses for all
   using (company_id = current_company_id())
   with check (company_id = current_company_id());
 create policy "tenant_products" on products for all
+  using (company_id = current_company_id())
+  with check (company_id = current_company_id());
+create policy "tenant_whatsapp_templates" on whatsapp_templates for all
   using (company_id = current_company_id())
   with check (company_id = current_company_id());
 

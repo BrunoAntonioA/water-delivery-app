@@ -18,12 +18,24 @@ export interface ClientInput {
 }
 
 export async function listClients(): Promise<ClientWithAddresses[]> {
-  const { data, error } = await supabase
-    .from('clients')
-    .select('*, addresses(*)')
-    .order('created_at', { ascending: false })
-  if (error) throw error
-  return (data ?? []) as ClientWithAddresses[]
+  // Supabase devuelve máximo 1000 filas por consulta, así que paginamos con
+  // .range() hasta traerlos todos. Se ordena también por id para que la
+  // paginación sea estable (muchos clientes importados comparten created_at).
+  const PAGE = 1000
+  const all: ClientWithAddresses[] = []
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from('clients')
+      .select('*, addresses(*)')
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: true })
+      .range(from, from + PAGE - 1)
+    if (error) throw error
+    const batch = (data ?? []) as ClientWithAddresses[]
+    all.push(...batch)
+    if (batch.length < PAGE) break
+  }
+  return all
 }
 
 export async function createClient(input: ClientInput): Promise<void> {

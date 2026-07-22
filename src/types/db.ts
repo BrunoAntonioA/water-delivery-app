@@ -30,6 +30,13 @@ export interface Product {
   created_at: string
 }
 
+export interface WhatsappTemplate {
+  id: string
+  name: string
+  content: string
+  created_at: string
+}
+
 export interface Order {
   id: string
   client_id: string

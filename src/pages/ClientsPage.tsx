@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   createClient,
   deleteClient,
@@ -9,16 +9,26 @@ import {
   type ClientInput,
 } from '../api/clients'
 import type { ClientWithAddresses } from '../types/db'
+import { useAuth } from '../lib/auth'
+import {
+  buildContactMessage,
+  clientTemplateContext,
+  renderTemplate,
+} from '../lib/whatsapp'
 import { Modal } from '../components/Modal'
+import { TemplatePicker } from '../components/TemplatePicker'
 import {
   Button,
   Card,
   EmptyState,
   Label,
+  Pagination,
   PageHeader,
   Spinner,
   TextInput,
 } from '../components/ui'
+
+const PAGE_SIZE = 15
 
 const emptyAddress: AddressInput = {
   label: '',
@@ -37,6 +47,7 @@ const emptyForm: ClientInput = {
 
 export default function ClientsPage() {
   const qc = useQueryClient()
+  const { company } = useAuth()
   const { data: clients, isLoading } = useQuery({
     queryKey: ['clients'],
     queryFn: listClients,
@@ -45,6 +56,35 @@ export default function ClientsPage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<ClientWithAddresses | null>(null)
   const [form, setForm] = useState<ClientInput>(emptyForm)
+
+  const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
+  const [contactClient, setContactClient] = useState<ClientWithAddresses | null>(
+    null
+  )
+
+  const filtered = useMemo(() => {
+    const qStr = search.trim().toLowerCase()
+    if (!qStr) return clients ?? []
+    const qDigits = qStr.replace(/\D/g, '')
+    return (clients ?? []).filter((c) => {
+      const fullName = `${c.name} ${c.surname}`.toLowerCase()
+      const phone = c.phone.toLowerCase()
+      const phoneDigits = c.phone.replace(/\D/g, '')
+      return (
+        fullName.includes(qStr) ||
+        phone.includes(qStr) ||
+        (qDigits.length > 0 && phoneDigits.includes(qDigits))
+      )
+    })
+  }, [clients, search])
+
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const currentPage = Math.min(page, pageCount)
+  const pageItems = filtered.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE
+  )
 
   const invalidate = () =>
     qc.invalidateQueries({ queryKey: ['clients'] })
@@ -132,15 +172,47 @@ export default function ClientsPage() {
         action={<Button onClick={openNew}>+ Nuevo cliente</Button>}
       />
 
+      {!isLoading && clients && clients.length > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <TextInput
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value)
+              setPage(1)
+            }}
+            placeholder="Buscar por nombre o teléfono…"
+            className="w-full sm:max-w-xs"
+          />
+          {search && (
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setSearch('')
+                setPage(1)
+              }}
+            >
+              Limpiar
+            </Button>
+          )}
+          <span className="ml-auto text-sm text-slate-400">
+            {filtered.length}{' '}
+            {filtered.length === 1 ? 'cliente' : 'clientes'}
+          </span>
+        </div>
+      )}
+
       {isLoading ? (
         <Spinner />
       ) : !clients || clients.length === 0 ? (
         <EmptyState>
           Aún no tienes clientes. Crea el primero con “Nuevo cliente”.
         </EmptyState>
+      ) : filtered.length === 0 ? (
+        <EmptyState>No hay clientes que coincidan con la búsqueda.</EmptyState>
       ) : (
-        <div className="grid gap-3">
-          {clients.map((c) => (
+        <>
+          <div className="grid gap-3">
+          {pageItems.map((c) => (
             <Card key={c.id} className="p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
@@ -168,7 +240,13 @@ export default function ClientsPage() {
                     </ul>
                   )}
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="success"
+                    onClick={() => setContactClient(c)}
+                  >
+                    Contactar
+                  </Button>
                   <Button variant="secondary" onClick={() => openEdit(c)}>
                     Editar
                   </Button>
@@ -187,7 +265,13 @@ export default function ClientsPage() {
               </div>
             </Card>
           ))}
-        </div>
+          </div>
+          <Pagination
+            page={currentPage}
+            pageCount={pageCount}
+            onPage={setPage}
+          />
+        </>
       )}
 
       <Modal
@@ -337,6 +421,27 @@ export default function ClientsPage() {
           </div>
         </form>
       </Modal>
+
+      <TemplatePicker
+        open={contactClient != null}
+        onClose={() => setContactClient(null)}
+        phone={contactClient?.phone ?? ''}
+        title="Contactar por WhatsApp"
+        buildMessage={(t) =>
+          contactClient
+            ? t
+              ? renderTemplate(
+                  t.content,
+                  clientTemplateContext(
+                    contactClient,
+                    contactClient.addresses[0],
+                    company?.name
+                  )
+                )
+              : buildContactMessage(contactClient, company?.name)
+            : ''
+        }
+      />
     </div>
   )
 }

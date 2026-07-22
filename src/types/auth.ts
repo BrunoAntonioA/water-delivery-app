@@ -22,13 +22,22 @@ export type ModuleKey =
   | 'rutas'
   | 'clientes'
   | 'productos'
+  | 'plantillas'
   | 'usuarios'
   | 'empresas'
 
 // Qué módulos puede ver cada rol.
 export const ROLE_MODULES: Record<Role, ModuleKey[]> = {
   superadmin: ['empresas'],
-  admin: ['pedidos', 'reportes', 'rutas', 'clientes', 'productos', 'usuarios'],
+  admin: [
+    'pedidos',
+    'reportes',
+    'rutas',
+    'clientes',
+    'productos',
+    'plantillas',
+    'usuarios',
+  ],
   operador: ['pedidos', 'reportes', 'clientes', 'productos'],
   repartidor: ['rutas'],
 }

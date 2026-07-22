@@ -2,10 +2,14 @@ import { useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import { listOrders } from '../api/orders'
 import { listClients } from '../api/clients'
-import type { OrderStatus } from '../types/db'
+import type { OrderDetail, OrderStatus } from '../types/db'
 import { formatDate, formatMoney, toLocalDateStr } from '../lib/format'
 import { ClientCombobox } from '../components/ClientCombobox'
-import { PAYMENT_LABELS, StatusBadge } from '../components/StatusBadge'
+import {
+  PAYMENT_LABELS,
+  STATUS_LABELS,
+  StatusBadge,
+} from '../components/StatusBadge'
 import {
   Button,
   Card,
@@ -39,20 +43,24 @@ export default function OrdersReportPage() {
     queryFn: listClients,
   })
 
-  const [dateFilter, setDateFilter] = useState('')
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [clientId, setClientId] = useState('')
   const [page, setPage] = useState(1)
 
   const filtered = useMemo(() => {
     return (orders ?? []).filter((o) => {
-      if (dateFilter && toLocalDateStr(o.created_at) !== dateFilter) return false
+      // Rango de fechas: 'YYYY-MM-DD' se compara lexicográficamente (= por fecha).
+      const date = toLocalDateStr(o.created_at)
+      if (fromDate && date < fromDate) return false
+      if (toDate && date > toDate) return false
       if (clientId && o.client_id !== clientId) return false
       if (statusFilter === 'all') return true
       if (statusFilter === 'unpaid') return o.status !== 'paid'
       return o.status === statusFilter
     })
-  }, [orders, dateFilter, statusFilter, clientId])
+  }, [orders, fromDate, toDate, statusFilter, clientId])
 
   const totalSum = useMemo(
     () => filtered.reduce((sum, o) => sum + Number(o.total), 0),
@@ -66,13 +74,66 @@ export default function OrdersReportPage() {
     currentPage * PAGE_SIZE
   )
 
-  const hasFilters = Boolean(dateFilter || clientId || statusFilter !== 'all')
+  const hasFilters = Boolean(
+    fromDate || toDate || clientId || statusFilter !== 'all'
+  )
 
   function clearAll() {
-    setDateFilter('')
+    setFromDate('')
+    setToDate('')
     setStatusFilter('all')
     setClientId('')
     setPage(1)
+  }
+
+  function exportCsv() {
+    if (filtered.length === 0) return
+
+    const headers = [
+      'Fecha',
+      'Cliente',
+      'Teléfono',
+      'Dirección',
+      'Detalle',
+      'Total',
+      'Estado',
+      'Pago',
+    ]
+
+    const rowOf = (o: OrderDetail) => [
+      formatDate(o.created_at),
+      o.client ? `${o.client.name} ${o.client.surname}`.trim() : '',
+      o.client?.phone ?? '',
+      o.address
+        ? [o.address.address, o.address.comuna].filter(Boolean).join(', ')
+        : '',
+      o.items
+        .map((it) => `${it.quantity} x ${it.product?.name ?? 'Producto'}`)
+        .join('; '),
+      String(Number(o.total)),
+      STATUS_LABELS[o.status],
+      o.status === 'paid' && o.payment_method
+        ? PAYMENT_LABELS[o.payment_method]
+        : '',
+    ]
+
+    // Escapa cada campo para CSV (comillas, comas y saltos de línea).
+    const esc = (v: string) => `"${String(v).replace(/"/g, '""')}"`
+    const lines = [headers, ...filtered.map(rowOf)].map((row) =>
+      row.map(esc).join(',')
+    )
+    // BOM para que Excel abra los acentos correctamente.
+    const csv = '﻿' + lines.join('\r\n')
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'reporte-pedidos.csv'
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
   }
 
   return (
@@ -80,6 +141,13 @@ export default function OrdersReportPage() {
       <PageHeader
         title="Reportes"
         subtitle="Consulta y filtra todos los pedidos por fecha, estado y cliente."
+        action={
+          filtered.length > 0 ? (
+            <Button variant="secondary" onClick={exportCsv}>
+              ⬇ Descargar CSV
+            </Button>
+          ) : undefined
+        }
       />
 
       {/* --- Filtros --- */}
@@ -97,15 +165,36 @@ export default function OrdersReportPage() {
             />
           </div>
           <div>
-            <Label>Fecha</Label>
-            <TextInput
-              type="date"
-              value={dateFilter}
-              onChange={(e) => {
-                setDateFilter(e.target.value)
-                setPage(1)
-              }}
-            />
+            <Label>Rango de fechas</Label>
+            <div className="flex flex-wrap items-center gap-2">
+              <TextInput
+                type="date"
+                value={fromDate}
+                max={toDate || undefined}
+                onChange={(e) => {
+                  setFromDate(e.target.value)
+                  setPage(1)
+                }}
+                className="w-full sm:w-auto"
+                aria-label="Desde"
+              />
+              <span className="hidden text-sm text-slate-400 sm:inline">a</span>
+              <TextInput
+                type="date"
+                value={toDate}
+                min={fromDate || undefined}
+                onChange={(e) => {
+                  setToDate(e.target.value)
+                  setPage(1)
+                }}
+                className="w-full sm:w-auto"
+                aria-label="Hasta"
+              />
+            </div>
+            <p className="mt-1 text-xs text-slate-400">
+              Deja ambas para ver todo, o pon la misma fecha en las dos para un
+              solo día.
+            </p>
           </div>
         </div>
 

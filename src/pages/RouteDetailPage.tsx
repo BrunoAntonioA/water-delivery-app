@@ -248,7 +248,8 @@ export default function RouteDetailPage() {
             )}
             {pending.length > 0 && (
               <p className="mt-2 text-xs text-slate-400">
-                Arrastra por el icono ⠿ para cambiar el orden de entrega.
+                Arrastra las tarjetas desde el asa de la izquierda para cambiar
+                el orden de entrega.
               </p>
             )}
           </section>
@@ -489,7 +490,7 @@ function StopCardInner({
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
       <div className="flex items-start gap-2">
-        <div className="mt-0.5 shrink-0">{leading}</div>
+        <div className="shrink-0">{leading}</div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-semibold text-slate-800">
@@ -574,10 +575,17 @@ function SortableStopCard({
             type="button"
             {...attributes}
             {...listeners}
-            aria-label="Arrastrar"
-            className="cursor-grab touch-none text-lg leading-none text-slate-400 hover:text-slate-600 active:cursor-grabbing"
+            aria-label="Arrastrar para reordenar"
+            className="flex h-12 w-10 shrink-0 cursor-grab touch-none items-center justify-center rounded-lg bg-slate-100 text-slate-500 hover:bg-slate-200 active:cursor-grabbing"
           >
-            ⠿
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+              <circle cx="9" cy="5" r="1.7" />
+              <circle cx="15" cy="5" r="1.7" />
+              <circle cx="9" cy="12" r="1.7" />
+              <circle cx="15" cy="12" r="1.7" />
+              <circle cx="9" cy="19" r="1.7" />
+              <circle cx="15" cy="19" r="1.7" />
+            </svg>
           </button>
         }
       />

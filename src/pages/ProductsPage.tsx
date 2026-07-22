@@ -16,11 +16,14 @@ import {
   Card,
   EmptyState,
   Label,
+  Pagination,
   PageHeader,
   Spinner,
   TextArea,
   TextInput,
 } from '../components/ui'
+
+const PAGE_SIZE = 9
 
 interface FormState {
   name: string
@@ -47,6 +50,15 @@ export default function ProductsPage() {
   const [editing, setEditing] = useState<Product | null>(null)
   const [form, setForm] = useState<FormState>(emptyForm)
   const [uploading, setUploading] = useState(false)
+  const [page, setPage] = useState(1)
+
+  const total = products?.length ?? 0
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const currentPage = Math.min(page, pageCount)
+  const pageItems = (products ?? []).slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE
+  )
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['products'] })
 
@@ -119,8 +131,9 @@ export default function ProductsPage() {
           Aún no tienes productos. Agrega el primero con “Nuevo producto”.
         </EmptyState>
       ) : (
+        <>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {products.map((p) => (
+          {pageItems.map((p) => (
             <Card key={p.id} className="overflow-hidden">
               <div className="flex h-40 items-center justify-center bg-slate-100">
                 {p.image_url ? (
@@ -167,6 +180,12 @@ export default function ProductsPage() {
             </Card>
           ))}
         </div>
+          <Pagination
+            page={currentPage}
+            pageCount={pageCount}
+            onPage={setPage}
+          />
+        </>
       )}
 
       <Modal

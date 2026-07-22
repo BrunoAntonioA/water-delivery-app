@@ -1,11 +1,17 @@
 import { useMutation } from '@tanstack/react-query'
 import { useState } from 'react'
 import { markOrderPaid, updateOrderStatus } from '../api/orders'
-import type { OrderDetail, PaymentMethod } from '../types/db'
+import type { OrderDetail, PaymentMethod, WhatsappTemplate } from '../types/db'
+import { useAuth } from '../lib/auth'
 import { formatMoney } from '../lib/format'
-import { buildWhatsAppUrl } from '../lib/whatsapp'
+import {
+  buildChargeMessage,
+  orderTemplateContext,
+  renderTemplate,
+} from '../lib/whatsapp'
 import { Modal } from './Modal'
 import { PAYMENT_LABELS, STATUS_LABELS } from './StatusBadge'
+import { TemplatePicker } from './TemplatePicker'
 import { Button, Label, TextInput } from './ui'
 
 // Redondea a 2 decimales para comparar montos sin errores de punto flotante.
@@ -27,9 +33,11 @@ export function OrderActions({
   onChanged: () => void
   className?: string
 }) {
+  const { company } = useAuth()
   const [payOpen, setPayOpen] = useState(false)
   const [payMethod, setPayMethod] = useState<PaymentMethod | ''>('')
   const [payAmount, setPayAmount] = useState('')
+  const [chargeOpen, setChargeOpen] = useState(false)
 
   const statusMutation = useMutation({
     mutationFn: (status: 'delivered') => updateOrderStatus(order.id, status),
@@ -55,15 +63,6 @@ export function OrderActions({
     payAmount.trim() !== '' && round2(Number(payAmount)) === round2(order.total)
   const canConfirmPayment = Boolean(payMethod) && amountMatches
 
-  function charge() {
-    const url = buildWhatsAppUrl(order)
-    if (!url) {
-      alert('El cliente no tiene un número de teléfono válido.')
-      return
-    }
-    window.open(url, '_blank', 'noopener')
-  }
-
   function openPay() {
     setPayMethod('')
     setPayAmount('')
@@ -74,7 +73,7 @@ export function OrderActions({
     <>
       <div className={className}>
         {canCharge && (
-          <Button variant="success" onClick={charge}>
+          <Button variant="success" onClick={() => setChargeOpen(true)}>
             <WhatsAppIcon /> Cobrar
           </Button>
         )}
@@ -183,6 +182,18 @@ export function OrderActions({
           </div>
         </form>
       </Modal>
+
+      <TemplatePicker
+        open={chargeOpen}
+        onClose={() => setChargeOpen(false)}
+        phone={order.client?.phone ?? ''}
+        title="Cobrar por WhatsApp"
+        buildMessage={(t: WhatsappTemplate | null) =>
+          t
+            ? renderTemplate(t.content, orderTemplateContext(order, company?.name))
+            : buildChargeMessage(order, company?.name)
+        }
+      />
     </>
   )
 }

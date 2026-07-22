@@ -18,6 +18,11 @@ El frontend es 100% React; los datos, imágenes y autenticación se manejan con
   de confirmar sólo se habilita si el monto coincide exactamente con el total.
 - **Cobro por WhatsApp**: para pedidos en estado *Pedido* o *Entregado*, un botón
   abre WhatsApp con un mensaje que incluye el detalle y el total a cobrar.
+- **Plantillas de WhatsApp**: crea mensajes reutilizables (nombre + contenido) con
+  variables `{cliente}`, `{empresa}`, `{telefono}`, `{direccion}`, `{detalle}`,
+  `{total}`. Al **Cobrar** (pedidos) o **Contactar** (clientes) eliges qué plantilla
+  usar y el mensaje se arma con esas variables; siempre está el “mensaje por
+  defecto”. `{detalle}` y `{total}` sólo se llenan al cobrar un pedido.
 - **Rutas de reparto**: agrupa pedidos en rutas (con fecha y repartidor) y
   **ordena las paradas arrastrándolas** para definir el recorrido. La tabla se
   divide en **Por entregar** (arrastrable) y **Entregados**; una parada baja
