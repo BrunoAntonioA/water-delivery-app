@@ -37,6 +37,26 @@ export interface WhatsappTemplate {
   created_at: string
 }
 
+export interface CostCategory {
+  id: string
+  name: string
+  created_at: string
+}
+
+export interface Cost {
+  id: string
+  name: string
+  description: string | null
+  issue_date: string
+  category_id: string | null
+  amount: number
+  created_at: string
+}
+
+export interface CostWithCategory extends Cost {
+  category: CostCategory | null
+}
+
 export interface Order {
   id: string
   client_id: string

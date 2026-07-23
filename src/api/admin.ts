@@ -152,3 +152,14 @@ export async function reactivateUser(id: string): Promise<void> {
     .eq('id', id)
   if (error) throw error
 }
+
+/**
+ * Elimina al usuario del sistema (borra su perfil). Desaparece de la lista y
+ * pierde todo acceso. La cuenta de inicio de sesión (Supabase Auth) permanece;
+ * para reutilizar ese correo hay que borrarla también en el panel de Supabase
+ * (Authentication → Users).
+ */
+export async function deleteUser(id: string): Promise<void> {
+  const { error } = await supabase.from('profiles').delete().eq('id', id)
+  if (error) throw error
+}

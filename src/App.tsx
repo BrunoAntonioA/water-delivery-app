@@ -9,6 +9,7 @@ import OrdersPage from './pages/OrdersPage'
 import OrdersReportPage from './pages/OrdersReportPage'
 import RoutesPage from './pages/RoutesPage'
 import RouteDetailPage from './pages/RouteDetailPage'
+import CostsPage from './pages/CostsPage'
 import TemplatesPage from './pages/TemplatesPage'
 import UsersPage from './pages/UsersPage'
 import CompaniesPage from './pages/CompaniesPage'
@@ -19,6 +20,7 @@ const NAV: { module: ModuleKey; to: string; label: string; icon: string }[] = [
   { module: 'pedidos', to: '/pedidos', label: 'Pedidos', icon: '📦' },
   { module: 'clientes', to: '/clientes', label: 'Clientes', icon: '👥' },
   { module: 'productos', to: '/productos', label: 'Productos', icon: '💧' },
+  { module: 'costos', to: '/costos', label: 'Costos', icon: '💸' },
   { module: 'reportes', to: '/reportes', label: 'Reportes', icon: '📊' },
   { module: 'plantillas', to: '/plantillas', label: 'Plantillas', icon: '💬' },
   { module: 'usuarios', to: '/usuarios', label: 'Usuarios', icon: '🔑' },
@@ -216,6 +218,14 @@ export default function App() {
             element={
               <Protected module="productos" home={home}>
                 <ProductsPage />
+              </Protected>
+            }
+          />
+          <Route
+            path="/costos"
+            element={
+              <Protected module="costos" home={home}>
+                <CostsPage />
               </Protected>
             }
           />

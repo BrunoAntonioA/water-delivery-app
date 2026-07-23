@@ -82,6 +82,27 @@ create table if not exists whatsapp_templates (
 );
 
 -- ----------------------------------------------------------------------------
+--  Costos: categorías y costos individuales
+-- ----------------------------------------------------------------------------
+create table if not exists cost_categories (
+  id         uuid primary key default gen_random_uuid(),
+  name       text not null,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists costs (
+  id          uuid primary key default gen_random_uuid(),
+  name        text not null,
+  description text,
+  issue_date  date not null default current_date,
+  category_id uuid references cost_categories (id) on delete set null,
+  amount      numeric(12, 2) not null default 0 check (amount >= 0),
+  created_at  timestamptz not null default now()
+);
+create index if not exists costs_category_id_idx on costs (category_id);
+create index if not exists costs_issue_date_idx on costs (issue_date);
+
+-- ----------------------------------------------------------------------------
 --  Pedidos
 -- ----------------------------------------------------------------------------
 create table if not exists orders (
@@ -236,6 +257,8 @@ alter table order_items add column if not exists company_id uuid references comp
 alter table routes      add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
 alter table route_stops add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
 alter table whatsapp_templates add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
+alter table cost_categories add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
+alter table costs add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
 
 -- ----------------------------------------------------------------------------
 --  Migración de datos existentes: crea una empresa inicial y asigna a ella
@@ -273,6 +296,8 @@ alter table order_items enable row level security;
 alter table routes      enable row level security;
 alter table route_stops enable row level security;
 alter table whatsapp_templates enable row level security;
+alter table cost_categories enable row level security;
+alter table costs       enable row level security;
 alter table companies   enable row level security;
 alter table profiles    enable row level security;
 
@@ -281,7 +306,7 @@ do $$
 declare
   t text;
 begin
-  foreach t in array array['clients', 'addresses', 'products', 'whatsapp_templates', 'orders', 'order_items', 'routes', 'route_stops']
+  foreach t in array array['clients', 'addresses', 'products', 'whatsapp_templates', 'cost_categories', 'costs', 'orders', 'order_items', 'routes', 'route_stops']
   loop
     execute format('drop policy if exists "allow_all_%1$s" on %1$s;', t);       -- limpia política antigua
     execute format('drop policy if exists "tenant_%1$s" on %1$s;', t);
@@ -298,6 +323,12 @@ create policy "tenant_products" on products for all
   using (company_id = current_company_id())
   with check (company_id = current_company_id());
 create policy "tenant_whatsapp_templates" on whatsapp_templates for all
+  using (company_id = current_company_id())
+  with check (company_id = current_company_id());
+create policy "tenant_cost_categories" on cost_categories for all
+  using (company_id = current_company_id())
+  with check (company_id = current_company_id());
+create policy "tenant_costs" on costs for all
   using (company_id = current_company_id())
   with check (company_id = current_company_id());
 

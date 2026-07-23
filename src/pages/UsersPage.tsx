@@ -3,6 +3,7 @@ import { useState } from 'react'
 import {
   createUser,
   deactivateUser,
+  deleteUser,
   listUsers,
   reactivateUser,
   updateUserRole,
@@ -82,6 +83,11 @@ export default function UsersPage() {
     onSuccess: invalidate,
   })
 
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => deleteUser(id),
+    onSuccess: invalidate,
+  })
+
   function openNew() {
     setForm(emptyForm)
     setModalOpen(true)
@@ -143,7 +149,7 @@ export default function UsersPage() {
                     </select>
                     {!isSelf && u.active && (
                       <Button
-                        variant="danger"
+                        variant="secondary"
                         onClick={() => {
                           if (
                             confirm(
@@ -162,6 +168,21 @@ export default function UsersPage() {
                         onClick={() => reactivateMutation.mutate(u.id)}
                       >
                         Reactivar
+                      </Button>
+                    )}
+                    {!isSelf && (
+                      <Button
+                        variant="danger"
+                        onClick={() => {
+                          if (
+                            confirm(
+                              `¿Eliminar definitivamente a ${u.full_name || u.email}? Se quitará de la lista y perderá el acceso. Esta acción no se puede deshacer.`
+                            )
+                          )
+                            deleteMutation.mutate(u.id)
+                        }}
+                      >
+                        Eliminar
                       </Button>
                     )}
                   </div>

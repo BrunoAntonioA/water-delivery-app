@@ -22,6 +22,7 @@ export type ModuleKey =
   | 'rutas'
   | 'clientes'
   | 'productos'
+  | 'costos'
   | 'plantillas'
   | 'usuarios'
   | 'empresas'
@@ -35,6 +36,7 @@ export const ROLE_MODULES: Record<Role, ModuleKey[]> = {
     'rutas',
     'clientes',
     'productos',
+    'costos',
     'plantillas',
     'usuarios',
   ],
