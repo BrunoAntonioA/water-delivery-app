@@ -90,8 +90,10 @@ export default function ClientsPage() {
     qc.invalidateQueries({ queryKey: ['clients'] })
 
   const saveMutation = useMutation({
-    mutationFn: () =>
-      editing ? updateClient(editing.id, form) : createClient(form),
+    mutationFn: async () => {
+      if (editing) await updateClient(editing.id, form)
+      else await createClient(form)
+    },
     onSuccess: () => {
       invalidate()
       setModalOpen(false)
@@ -158,10 +160,7 @@ export default function ClientsPage() {
     (a) => a.address.trim() && a.comuna.trim()
   )
   const canSave = Boolean(
-    form.name.trim() &&
-      form.surname.trim() &&
-      form.phone.trim() &&
-      hasCompleteAddress
+    form.name.trim() && form.phone.trim() && hasCompleteAddress
   )
 
   return (
@@ -298,13 +297,12 @@ export default function ClientsPage() {
               />
             </div>
             <div>
-              <Label>Apellido *</Label>
+              <Label>Apellido</Label>
               <TextInput
                 value={form.surname}
                 onChange={(e) =>
                   setForm({ ...form, surname: e.target.value })
                 }
-                required
               />
             </div>
           </div>

@@ -323,25 +323,15 @@ create policy "tenant_route_stops" on route_stops for all
     and (current_user_role() <> 'repartidor' or is_my_route(route_id))
   );
 
--- Pedidos: el repartidor sólo ve los pedidos que están en sus rutas.
+-- Pedidos: acceso a los pedidos de la empresa (todos los roles, incluido el
+-- repartidor, para que pueda crear pedidos). El aislamiento del repartidor se
+-- mantiene en las rutas (routes / route_stops), no en los pedidos.
 create policy "tenant_orders" on orders for all
-  using (
-    company_id = current_company_id()
-    and (current_user_role() <> 'repartidor' or order_in_my_route(id))
-  )
-  with check (
-    company_id = current_company_id()
-    and (current_user_role() <> 'repartidor' or order_in_my_route(id))
-  );
+  using (company_id = current_company_id())
+  with check (company_id = current_company_id());
 create policy "tenant_order_items" on order_items for all
-  using (
-    company_id = current_company_id()
-    and (current_user_role() <> 'repartidor' or order_in_my_route(order_id))
-  )
-  with check (
-    company_id = current_company_id()
-    and (current_user_role() <> 'repartidor' or order_in_my_route(order_id))
-  );
+  using (company_id = current_company_id())
+  with check (company_id = current_company_id());
 
 -- Empresas: el superadmin administra todas; cada usuario lee la suya; el admin
 -- puede renombrar la suya.

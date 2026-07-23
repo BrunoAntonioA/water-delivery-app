@@ -39,7 +39,7 @@ export const ROLE_MODULES: Record<Role, ModuleKey[]> = {
     'usuarios',
   ],
   operador: ['pedidos', 'reportes', 'clientes', 'productos'],
-  repartidor: ['rutas'],
+  repartidor: ['rutas', 'pedidos'],
 }
 
 export const ROLE_LABELS: Record<Role, string> = {

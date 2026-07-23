@@ -38,7 +38,12 @@ export async function listClients(): Promise<ClientWithAddresses[]> {
   return all
 }
 
-export async function createClient(input: ClientInput): Promise<void> {
+export interface CreatedClient {
+  id: string
+  addressId: string | null
+}
+
+export async function createClient(input: ClientInput): Promise<CreatedClient> {
   const { data: client, error } = await supabase
     .from('clients')
     .insert({
@@ -69,13 +74,16 @@ export async function createClient(input: ClientInput): Promise<void> {
     throw new Error('El cliente debe tener al menos una dirección.')
   }
 
-  const { error: addrError } = await supabase
+  const { data: insertedAddrs, error: addrError } = await supabase
     .from('addresses')
     .insert(addresses)
+    .select('id')
   if (addrError) {
     await supabase.from('clients').delete().eq('id', client.id)
     throw addrError
   }
+
+  return { id: client.id as string, addressId: insertedAddrs?.[0]?.id ?? null }
 }
 
 export async function updateClient(

@@ -34,6 +34,7 @@ import { OrderActions } from '../components/OrderActions'
 import { StatusBadge } from '../components/StatusBadge'
 import {
   Button,
+  CallButton,
   Card,
   CopyButton,
   EmptyState,
@@ -363,7 +364,10 @@ function StopCells({
         <div className="flex items-center gap-1">
           <span>{order?.client?.phone ?? '—'}</span>
           {order?.client?.phone && (
-            <CopyButton value={order.client.phone} label="Copiar teléfono" />
+            <>
+              <CallButton phone={order.client.phone} />
+              <CopyButton value={order.client.phone} label="Copiar teléfono" />
+            </>
           )}
         </div>
       </td>
@@ -527,6 +531,7 @@ function StopCardInner({
             <div className="mt-0.5 flex items-center gap-2 text-sm text-slate-500">
               <span aria-hidden>📞</span>
               <span className="flex-1">{order.client.phone}</span>
+              <CallButton phone={order.client.phone} />
               <CopyButton value={order.client.phone} label="Copiar teléfono" />
             </div>
           )}

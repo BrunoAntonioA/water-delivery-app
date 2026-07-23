@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import { createOrder, deleteOrder, listOrders, type OrderItemInput } from '../api/orders'
-import { listClients } from '../api/clients'
+import { createClient, listClients } from '../api/clients'
 import { listProducts } from '../api/products'
 import type { OrderDetail, OrderStatus } from '../types/db'
 import { formatDate, formatMoney, toLocalDateStr } from '../lib/format'
@@ -12,6 +12,7 @@ import { OrderActions } from '../components/OrderActions'
 import { PAYMENT_LABELS, StatusBadge } from '../components/StatusBadge'
 import {
   Button,
+  CallButton,
   Card,
   CopyButton,
   EmptyState,
@@ -64,6 +65,11 @@ export default function OrdersPage() {
   const [addressId, setAddressId] = useState('')
   const [notes, setNotes] = useState('')
   const [items, setItems] = useState<DraftItem[]>([])
+
+  // Registro rápido de cliente dentro del formulario de pedido.
+  const emptyNewClient = { name: '', surname: '', phone: '', address: '', comuna: '' }
+  const [newClientMode, setNewClientMode] = useState(false)
+  const [newClient, setNewClient] = useState(emptyNewClient)
 
   const [dateFilter, setDateFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
@@ -134,11 +140,45 @@ export default function OrdersPage() {
     onSuccess: invalidate,
   })
 
+  const createClientMutation = useMutation({
+    mutationFn: () =>
+      createClient({
+        name: newClient.name.trim(),
+        surname: newClient.surname.trim(),
+        national_id: '',
+        phone: newClient.phone.trim(),
+        addresses: [
+          {
+            label: 'Casa',
+            address: newClient.address.trim(),
+            comuna: newClient.comuna.trim(),
+            observation: '',
+          },
+        ],
+      }),
+    onSuccess: ({ id, addressId: newAddressId }) => {
+      qc.invalidateQueries({ queryKey: ['clients'] })
+      setClientId(id)
+      setAddressId(newAddressId ?? '')
+      setNewClientMode(false)
+      setNewClient(emptyNewClient)
+    },
+  })
+
+  const canSaveNewClient = Boolean(
+    newClient.name.trim() &&
+      newClient.phone.trim() &&
+      newClient.address.trim() &&
+      newClient.comuna.trim()
+  )
+
   function openNew() {
     setClientId('')
     setAddressId('')
     setNotes('')
     setItems([{ product_id: '', quantity: 1 }])
+    setNewClientMode(false)
+    setNewClient(emptyNewClient)
     setModalOpen(true)
   }
 
@@ -273,6 +313,7 @@ export default function OrdersPage() {
                     {o.client?.phone && (
                       <div className="mt-1 flex items-center gap-2 text-sm text-slate-500">
                         <span className="flex-1">📞 {o.client.phone}</span>
+                        <CallButton phone={o.client.phone} />
                         <CopyButton
                           value={o.client.phone}
                           label="Copiar teléfono"
@@ -384,14 +425,89 @@ export default function OrdersPage() {
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <Label>Cliente *</Label>
-              <ClientCombobox
-                clients={clients ?? []}
-                value={clientId}
-                onChange={(id) => {
-                  setClientId(id)
-                  setAddressId('')
-                }}
-              />
+              {newClientMode ? (
+                <div className="space-y-2 rounded-lg border border-sky-200 bg-sky-50/60 p-3">
+                  <p className="text-sm font-medium text-slate-700">
+                    Registrar cliente nuevo
+                  </p>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <TextInput
+                      value={newClient.name}
+                      onChange={(e) =>
+                        setNewClient({ ...newClient, name: e.target.value })
+                      }
+                      placeholder="Nombre *"
+                      autoFocus
+                    />
+                    <TextInput
+                      value={newClient.surname}
+                      onChange={(e) =>
+                        setNewClient({ ...newClient, surname: e.target.value })
+                      }
+                      placeholder="Apellido"
+                    />
+                  </div>
+                  <TextInput
+                    value={newClient.phone}
+                    onChange={(e) =>
+                      setNewClient({ ...newClient, phone: e.target.value })
+                    }
+                    placeholder="Teléfono * (+56912345678)"
+                  />
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <TextInput
+                      value={newClient.address}
+                      onChange={(e) =>
+                        setNewClient({ ...newClient, address: e.target.value })
+                      }
+                      placeholder="Dirección *"
+                    />
+                    <TextInput
+                      value={newClient.comuna}
+                      onChange={(e) =>
+                        setNewClient({ ...newClient, comuna: e.target.value })
+                      }
+                      placeholder="Comuna *"
+                    />
+                  </div>
+                  {createClientMutation.isError && (
+                    <p className="text-sm text-red-600">
+                      Error: {(createClientMutation.error as Error).message}
+                    </p>
+                  )}
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      onClick={() => createClientMutation.mutate()}
+                      disabled={!canSaveNewClient || createClientMutation.isPending}
+                    >
+                      {createClientMutation.isPending
+                        ? 'Guardando…'
+                        : 'Guardar y usar'}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => setNewClientMode(false)}
+                    >
+                      Cancelar
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <ClientCombobox
+                  clients={clients ?? []}
+                  value={clientId}
+                  onChange={(id) => {
+                    setClientId(id)
+                    setAddressId('')
+                  }}
+                  onCreateNew={(q) => {
+                    setNewClient({ ...emptyNewClient, name: q })
+                    setNewClientMode(true)
+                  }}
+                />
+              )}
             </div>
             <div>
               <Label>Dirección de entrega</Label>
@@ -573,6 +689,7 @@ function OrderRow({
         {o.client?.phone ? (
           <div className="flex items-center gap-1">
             <span>{o.client.phone}</span>
+            <CallButton phone={o.client.phone} />
             <CopyButton value={o.client.phone} label="Copiar teléfono" />
           </div>
         ) : (

@@ -182,6 +182,38 @@ export function CopyButton({
   )
 }
 
+/** Botón que llama al número (abre el marcador del teléfono en móvil). */
+export function CallButton({
+  phone,
+  label = 'Llamar',
+}: {
+  phone: string
+  label?: string
+}) {
+  function onCall(e: React.MouseEvent) {
+    e.stopPropagation()
+    window.location.href = `tel:${phone.replace(/[^\d+]/g, '')}`
+  }
+  return (
+    <button
+      type="button"
+      onClick={onCall}
+      title={label}
+      aria-label={label}
+      className="shrink-0 rounded-md p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-emerald-600"
+    >
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+        <path
+          d="M6.6 10.8a15 15 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.24 11.4 11.4 0 0 0 3.6.58 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.46.58 3.6a1 1 0 0 1-.25 1z"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </button>
+  )
+}
+
 /** Botón que abre una dirección en Google Maps (búsqueda por texto). */
 export function MapButton({
   query,

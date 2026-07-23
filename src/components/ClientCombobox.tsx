@@ -10,10 +10,14 @@ export function ClientCombobox({
   clients,
   value,
   onChange,
+  onCreateNew,
 }: {
   clients: ClientWithAddresses[]
   value: string
   onChange: (clientId: string) => void
+  // Si se provee, muestra la opción "Registrar cliente nuevo" (recibe el texto
+  // buscado para pre-llenar el nombre).
+  onCreateNew?: (query: string) => void
 }) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
@@ -92,9 +96,7 @@ export function ClientCombobox({
       {open && (
         <ul className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
           {filtered.length === 0 ? (
-            <li className="px-3 py-2 text-sm text-slate-400">
-              Sin resultados
-            </li>
+            <li className="px-3 py-2 text-sm text-slate-400">Sin resultados</li>
           ) : (
             filtered.map((c) => (
               <li key={c.id}>
@@ -113,6 +115,26 @@ export function ClientCombobox({
                 </button>
               </li>
             ))
+          )}
+          {onCreateNew && (
+            <li className="border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => {
+                  onCreateNew(query.trim())
+                  setOpen(false)
+                }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-sky-700 hover:bg-sky-50"
+              >
+                <span className="text-base leading-none">＋</span>
+                Registrar cliente nuevo
+                {query.trim() && (
+                  <span className="truncate text-slate-400">
+                    “{query.trim()}”
+                  </span>
+                )}
+              </button>
+            </li>
           )}
         </ul>
       )}
