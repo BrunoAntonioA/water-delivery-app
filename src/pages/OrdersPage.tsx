@@ -6,6 +6,8 @@ import { listProducts } from '../api/products'
 import type { OrderDetail, OrderStatus } from '../types/db'
 import { formatDate, formatMoney, toLocalDateStr } from '../lib/format'
 import { useIsMobile } from '../lib/useIsMobile'
+import { orderClientName, returnedBidonesText } from '../lib/order'
+import { OrderItemsList } from '../components/OrderItems'
 import { ClientCombobox } from '../components/ClientCombobox'
 import { Modal } from '../components/Modal'
 import { OrderActions } from '../components/OrderActions'
@@ -273,9 +275,7 @@ export default function OrdersPage() {
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-semibold text-slate-900">
-                        {o.client
-                          ? `${o.client.name} ${o.client.surname}`
-                          : 'Cliente eliminado'}
+                        {orderClientName(o)}
                       </span>
                       <StatusBadge status={o.status} />
                     </div>
@@ -345,6 +345,16 @@ export default function OrdersPage() {
                   <p className="font-bold text-slate-900">
                     Total: {formatMoney(o.total)}
                   </p>
+                  {o.status !== 'ordered' && o.returned_bidones != null && (
+                    <p className="mt-1 text-sm text-slate-600">
+                      ↩ {o.returned_bidones} bidones devueltos
+                    </p>
+                  )}
+                  {o.status === 'delivered' && o.payment_method && (
+                    <p className="mt-1 text-sm text-slate-600">
+                      Método de pago: {PAYMENT_LABELS[o.payment_method]}
+                    </p>
+                  )}
                   {o.status === 'paid' && o.payment_method && (
                     <p className="mt-1 text-sm text-emerald-700">
                       ✓ Pagado con {PAYMENT_LABELS[o.payment_method]}
@@ -377,10 +387,13 @@ export default function OrdersPage() {
                 <thead>
                   <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase text-slate-500">
                     <th className="px-3 py-2">Cliente</th>
+                    <th className="px-3 py-2">Productos</th>
                     <th className="px-3 py-2">Dirección</th>
                     <th className="px-3 py-2">Teléfono</th>
                     <th className="px-3 py-2 text-right">Total</th>
                     <th className="px-3 py-2">Estado</th>
+                    <th className="px-3 py-2">Método</th>
+                    <th className="px-3 py-2 text-center">Devueltos</th>
                     <th className="px-3 py-2">Acciones</th>
                     <th className="w-10 px-2 py-2"></th>
                   </tr>
@@ -574,18 +587,23 @@ export default function OrdersPage() {
                         <span className="text-sm text-slate-500 sm:sr-only">
                           Cantidad
                         </span>
-                        <TextInput
-                          type="number"
-                          min="1"
-                          inputMode="numeric"
-                          value={it.quantity}
-                          onChange={(e) =>
-                            updateItem(i, {
-                              quantity: Math.max(1, Number(e.target.value) || 1),
-                            })
-                          }
-                          className="w-20 bg-white text-center"
-                        />
+                        <div className="w-20 shrink-0">
+                          <TextInput
+                            type="number"
+                            min="1"
+                            inputMode="numeric"
+                            value={it.quantity}
+                            onChange={(e) =>
+                              updateItem(i, {
+                                quantity: Math.max(
+                                  1,
+                                  Number(e.target.value) || 1
+                                ),
+                              })
+                            }
+                            className="bg-white text-center"
+                          />
+                        </div>
                       </label>
                       <div className="flex items-center gap-1">
                         <span className="text-base font-semibold text-slate-800 sm:w-24 sm:text-right sm:text-sm sm:font-medium">
@@ -665,15 +683,16 @@ function OrderRow({
   onChanged: () => void
   onDelete: () => void
 }) {
-  const clientName = o.client
-    ? `${o.client.name} ${o.client.surname}`
-    : 'Cliente eliminado'
+  const clientName = orderClientName(o)
   const addressFull = o.address
     ? [o.address.address, o.address.comuna].filter(Boolean).join(', ')
     : ''
   return (
     <tr className="border-b border-slate-100 last:border-0 [&>td]:align-middle">
       <td className="px-3 py-2 font-medium text-slate-800">{clientName}</td>
+      <td className="px-3 py-2 text-slate-600">
+        <OrderItemsList items={o.items} />
+      </td>
       <td className="px-3 py-2 text-slate-600">
         {o.address ? (
           <div className="flex items-center gap-1">
@@ -701,6 +720,12 @@ function OrderRow({
       </td>
       <td className="px-3 py-2">
         <StatusBadge status={o.status} />
+      </td>
+      <td className="px-3 py-2 text-slate-700">
+        {o.payment_method ? PAYMENT_LABELS[o.payment_method] : '—'}
+      </td>
+      <td className="px-3 py-2 text-center tabular-nums text-slate-700">
+        {returnedBidonesText(o)}
       </td>
       <td className="px-3 py-2">
         <OrderActions

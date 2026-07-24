@@ -59,12 +59,14 @@ export interface CostWithCategory extends Cost {
 
 export interface Order {
   id: string
-  client_id: string
+  client_id: string | null
+  customer_name: string | null
   address_id: string | null
   status: OrderStatus
   total: number
   payment_method: PaymentMethod | null
   paid_amount: number | null
+  returned_bidones: number | null
   notes: string | null
   created_at: string
 }

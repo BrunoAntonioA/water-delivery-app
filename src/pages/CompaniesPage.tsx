@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
   createCompany,
   createUser,
@@ -93,26 +94,33 @@ export default function CompaniesPage() {
           {companies.map((c) => (
             <Card key={c.id} className="p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="font-semibold text-slate-900">{c.name}</p>
+                <Link to={`/empresas/${c.id}`} className="group min-w-0 flex-1">
+                  <p className="font-semibold text-slate-900 group-hover:text-sky-700">
+                    {c.name}
+                  </p>
                   <p className="text-sm text-slate-500">
                     👥 {c.userCount} {c.userCount === 1 ? 'usuario' : 'usuarios'}{' '}
                     · Creada {formatDate(c.created_at)}
                   </p>
-                </div>
-                <Button
-                  variant="danger"
-                  onClick={() => {
-                    if (
-                      confirm(
-                        `¿Eliminar "${c.name}"? Se borrarán TODOS sus datos y usuarios.`
+                </Link>
+                <div className="flex gap-2">
+                  <Link to={`/empresas/${c.id}`}>
+                    <Button variant="secondary">Ver usuarios</Button>
+                  </Link>
+                  <Button
+                    variant="danger"
+                    onClick={() => {
+                      if (
+                        confirm(
+                          `¿Eliminar "${c.name}"? Se borrarán TODOS sus datos y usuarios.`
+                        )
                       )
-                    )
-                      deleteMutation.mutate(c.id)
-                  }}
-                >
-                  Eliminar
-                </Button>
+                        deleteMutation.mutate(c.id)
+                    }}
+                  >
+                    Eliminar
+                  </Button>
+                </div>
               </div>
             </Card>
           ))}

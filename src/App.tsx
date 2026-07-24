@@ -10,6 +10,7 @@ import OrdersReportPage from './pages/OrdersReportPage'
 import RoutesPage from './pages/RoutesPage'
 import RouteDetailPage from './pages/RouteDetailPage'
 import CostsPage from './pages/CostsPage'
+import CompanyDetailPage from './pages/CompanyDetailPage'
 import TemplatesPage from './pages/TemplatesPage'
 import UsersPage from './pages/UsersPage'
 import CompaniesPage from './pages/CompaniesPage'
@@ -79,20 +80,28 @@ function SidebarNav({
   )
 }
 
+function LoadingScreen() {
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center gap-4">
+      <Spinner />
+      <p className="text-sm text-slate-500">Cargando tu información…</p>
+    </div>
+  )
+}
+
 export default function App() {
-  const { session, profile, company, loading, signOut } = useAuth()
+  const { session, profile, company, loading, profileLoading, signOut } =
+    useAuth()
   const [menuOpen, setMenuOpen] = useState(false)
 
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <Spinner />
-      </div>
-    )
-  }
+  if (loading) return <LoadingScreen />
 
   // Sin sesión → login.
   if (!session) return <LoginPage />
+
+  // Con sesión pero el perfil aún cargando (p. ej. tras refrescar el token o con
+  // internet lento): mostramos "Cargando" en lugar de un "Sin acceso" prematuro.
+  if (profileLoading) return <LoadingScreen />
 
   // Con sesión pero sin perfil, o perfil desactivado → sin acceso.
   // (active === false sólo cuando está explícitamente desactivado; si la columna
@@ -250,6 +259,14 @@ export default function App() {
             element={
               <Protected module="empresas" home={home}>
                 <CompaniesPage />
+              </Protected>
+            }
+          />
+          <Route
+            path="/empresas/:id"
+            element={
+              <Protected module="empresas" home={home}>
+                <CompanyDetailPage />
               </Protected>
             }
           />

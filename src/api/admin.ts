@@ -19,6 +19,16 @@ export async function listCompanies(): Promise<CompanySummary[]> {
   })
 }
 
+export async function getCompany(id: string): Promise<Company | null> {
+  const { data, error } = await supabase
+    .from('companies')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle()
+  if (error) throw error
+  return (data as Company | null) ?? null
+}
+
 export async function createCompany(name: string): Promise<string> {
   const { data, error } = await supabase
     .from('companies')
@@ -49,6 +59,19 @@ export async function listUsers(): Promise<Profile[]> {
   const { data, error } = await supabase
     .from('profiles')
     .select('*')
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return (data ?? []) as Profile[]
+}
+
+/** Usuarios de una empresa específica (para el detalle de Empresas). */
+export async function listUsersByCompany(
+  companyId: string
+): Promise<Profile[]> {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('company_id', companyId)
     .order('created_at', { ascending: false })
   if (error) throw error
   return (data ?? []) as Profile[]

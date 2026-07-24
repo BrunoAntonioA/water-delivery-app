@@ -1,9 +1,19 @@
 import { useMutation } from '@tanstack/react-query'
 import { useState } from 'react'
-import { markOrderPaid, updateOrderStatus } from '../api/orders'
-import type { OrderDetail, PaymentMethod, WhatsappTemplate } from '../types/db'
+import {
+  markOrderDelivered,
+  markOrderPaid,
+  updateOrderStatus,
+} from '../api/orders'
+import type {
+  OrderDetail,
+  OrderStatus,
+  PaymentMethod,
+  WhatsappTemplate,
+} from '../types/db'
 import { useAuth } from '../lib/auth'
 import { formatMoney } from '../lib/format'
+import { orderClientName } from '../lib/order'
 import {
   buildChargeMessage,
   orderTemplateContext,
@@ -20,8 +30,14 @@ function round2(n: number): number {
 }
 
 /**
- * Acciones de un pedido: cobrar por WhatsApp y avanzar el estado
- * (Pedido → Entregado → Pagado, con captura de método y monto al pagar).
+ * Acciones de un pedido: cobrar por WhatsApp y cambiar el estado.
+ *
+ * - Pedido → al marcar Entregado se puede indicar en el mismo paso si ya pagó
+ *   (método + monto).
+ * - Entregado → Marcar Pagado (método + monto).
+ * - Entregado / Pagado → Deshacer: vuelve un paso atrás por si fue un error
+ *   (al salir de "Pagado" se limpian método y monto).
+ *
  * Se usa tanto en la lista de Pedidos como en la tabla de una Ruta.
  */
 export function OrderActions({
@@ -34,37 +50,90 @@ export function OrderActions({
   className?: string
 }) {
   const { company } = useAuth()
+  const [deliverOpen, setDeliverOpen] = useState(false)
   const [payOpen, setPayOpen] = useState(false)
+  const [alsoPaid, setAlsoPaid] = useState(false)
   const [payMethod, setPayMethod] = useState<PaymentMethod | ''>('')
   const [payAmount, setPayAmount] = useState('')
+  const [returned, setReturned] = useState('0')
   const [chargeOpen, setChargeOpen] = useState(false)
 
   const statusMutation = useMutation({
-    mutationFn: (status: 'delivered') => updateOrderStatus(order.id, status),
-    onSuccess: onChanged,
+    mutationFn: (status: OrderStatus) => updateOrderStatus(order.id, status),
+    onSuccess: () => {
+      onChanged()
+      setDeliverOpen(false)
+    },
+    onError: (err) => {
+      // Los botones "Deshacer" no tienen UI de error propia; avisamos aquí para
+      // que un fallo no parezca "no pasó nada".
+      alert(`No se pudo cambiar el estado: ${(err as Error).message}`)
+    },
+  })
+
+  function revertTo(status: OrderStatus) {
+    statusMutation.mutate(status)
+  }
+
+  const deliverMutation = useMutation({
+    mutationFn: ({
+      returnedBidones,
+      method,
+    }: {
+      returnedBidones: number
+      method: PaymentMethod
+    }) => markOrderDelivered(order.id, returnedBidones, method),
+    onSuccess: () => {
+      onChanged()
+      setDeliverOpen(false)
+    },
   })
 
   const payMutation = useMutation({
     mutationFn: ({
       method,
       amount,
+      returnedBidones,
     }: {
       method: PaymentMethod
       amount: number
-    }) => markOrderPaid(order.id, method, amount),
+      returnedBidones?: number
+    }) => markOrderPaid(order.id, method, amount, returnedBidones),
     onSuccess: () => {
       onChanged()
       setPayOpen(false)
+      setDeliverOpen(false)
     },
   })
 
+  const busy =
+    statusMutation.isPending ||
+    deliverMutation.isPending ||
+    payMutation.isPending
   const canCharge = order.status === 'ordered' || order.status === 'delivered'
   const amountMatches =
     payAmount.trim() !== '' && round2(Number(payAmount)) === round2(order.total)
   const canConfirmPayment = Boolean(payMethod) && amountMatches
+  const returnedValid =
+    returned.trim() !== '' &&
+    Number.isInteger(Number(returned)) &&
+    Number(returned) >= 0
+
+  function resetPayFields() {
+    setPayMethod('')
+    setPayAmount('')
+  }
+
+  function openDeliver() {
+    setAlsoPaid(false)
+    setReturned('0')
+    resetPayFields()
+    setDeliverOpen(true)
+  }
 
   function openPay() {
-    setPayMethod('')
+    // El método suele venir del momento de la entrega; lo prellenamos.
+    setPayMethod(order.payment_method ?? '')
     setPayAmount('')
     setPayOpen(true)
   }
@@ -82,86 +151,180 @@ export function OrderActions({
             <WhatsAppIcon />
           </Button>
         )}
+
         {order.status === 'ordered' && (
-          <Button
-            onClick={() => statusMutation.mutate('delivered')}
-            disabled={statusMutation.isPending}
-          >
+          <Button onClick={openDeliver} disabled={busy}>
             Marcar {STATUS_LABELS.delivered}
           </Button>
         )}
+
         {order.status === 'delivered' && (
-          <Button onClick={openPay}>Marcar {STATUS_LABELS.paid}</Button>
+          <>
+            <Button onClick={openPay} disabled={busy}>
+              Marcar {STATUS_LABELS.paid}
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => revertTo('ordered')}
+              disabled={busy}
+              title="Volver a Pedido"
+            >
+              <UndoIcon /> Deshacer
+            </Button>
+          </>
+        )}
+
+        {order.status === 'paid' && (
+          <>
+            <Button
+              variant="ghost"
+              onClick={() => revertTo('delivered')}
+              disabled={busy}
+              title="Marcar como no pagado (volver a Entregado)"
+            >
+              <UndoIcon /> Deshacer pago
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => revertTo('ordered')}
+              disabled={busy}
+              title="Volver a Pedido (anula entrega y pago)"
+            >
+              <UndoIcon /> Volver a pedido
+            </Button>
+          </>
         )}
       </div>
 
+      {/* Marcar como entregado (con opción de registrar el pago en el mismo paso) */}
       <Modal
-        open={payOpen}
-        onClose={() => setPayOpen(false)}
-        title="Registrar pago"
+        open={deliverOpen}
+        onClose={() => setDeliverOpen(false)}
+        title="Marcar como entregado"
       >
         <form
           onSubmit={(e) => {
             e.preventDefault()
-            if (!payMethod || !canConfirmPayment) return
+            if (!returnedValid || !payMethod) return
+            const returnedBidones = Number(returned)
+            if (alsoPaid) {
+              if (!amountMatches) return
+              payMutation.mutate({
+                method: payMethod,
+                amount: round2(Number(payAmount)),
+                returnedBidones,
+              })
+            } else {
+              deliverMutation.mutate({ returnedBidones, method: payMethod })
+            }
+          }}
+          className="space-y-4"
+        >
+          <OrderSummary order={order} />
+
+          <div>
+            <Label>Bidones devueltos *</Label>
+            <TextInput
+              type="number"
+              min="0"
+              step="1"
+              value={returned}
+              onChange={(e) => setReturned(e.target.value)}
+              placeholder="0"
+            />
+            {!returnedValid && (
+              <p className="mt-1 text-sm text-red-600">
+                Ingresa un número entero de bidones (0 o más).
+              </p>
+            )}
+          </div>
+
+          <MethodSelector method={payMethod} setMethod={setPayMethod} />
+
+          <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-200 px-4 py-3">
+            <input
+              type="checkbox"
+              checked={alsoPaid}
+              onChange={(e) => {
+                setAlsoPaid(e.target.checked)
+                if (!e.target.checked) setPayAmount('')
+              }}
+              className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+            />
+            <span className="text-sm font-medium text-slate-700">
+              El cliente ya pagó
+            </span>
+          </label>
+
+          {alsoPaid && (
+            <AmountField
+              amount={payAmount}
+              setAmount={setPayAmount}
+              total={order.total}
+              amountMatches={amountMatches}
+            />
+          )}
+
+          {(deliverMutation.isError || payMutation.isError) && (
+            <p className="text-sm text-red-600">
+              Error al guardar:{' '}
+              {
+                ((deliverMutation.error ?? payMutation.error) as Error)
+                  .message
+              }
+            </p>
+          )}
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setDeliverOpen(false)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="submit"
+              disabled={
+                busy ||
+                !returnedValid ||
+                !payMethod ||
+                (alsoPaid && !amountMatches)
+              }
+            >
+              {busy
+                ? 'Guardando…'
+                : alsoPaid
+                  ? 'Entregar y cobrar'
+                  : 'Marcar entregado'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Registrar pago (desde estado Entregado) */}
+      <Modal open={payOpen} onClose={() => setPayOpen(false)} title="Registrar pago">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (!canConfirmPayment) return
             payMutation.mutate({
-              method: payMethod,
+              method: payMethod as PaymentMethod,
               amount: round2(Number(payAmount)),
             })
           }}
           className="space-y-4"
         >
-          <div className="rounded-lg bg-slate-50 px-4 py-3 text-sm">
-            <p className="font-medium text-slate-700">
-              {order.client
-                ? `${order.client.name} ${order.client.surname}`
-                : 'Cliente'}
-            </p>
-            <p className="text-slate-500">
-              Total del pedido:{' '}
-              <span className="font-bold text-slate-900">
-                {formatMoney(order.total)}
-              </span>
-            </p>
-          </div>
+          <OrderSummary order={order} />
 
-          <div>
-            <Label>Método de pago *</Label>
-            <div className="grid grid-cols-2 gap-2">
-              {(['transferencia', 'efectivo'] as PaymentMethod[]).map((m) => (
-                <button
-                  type="button"
-                  key={m}
-                  onClick={() => setPayMethod(m)}
-                  className={`rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
-                    payMethod === m
-                      ? 'border-sky-500 bg-sky-50 text-sky-700'
-                      : 'border-slate-300 text-slate-600 hover:bg-slate-50'
-                  }`}
-                >
-                  {PAYMENT_LABELS[m]}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <Label>Monto recibido *</Label>
-            <TextInput
-              type="number"
-              min="0"
-              step="0.01"
-              value={payAmount}
-              onChange={(e) => setPayAmount(e.target.value)}
-              placeholder={String(order.total)}
-            />
-            {payAmount.trim() !== '' && !amountMatches && (
-              <p className="mt-1 text-sm text-red-600">
-                El monto debe ser igual al total del pedido (
-                {formatMoney(order.total)}).
-              </p>
-            )}
-          </div>
+          <PaymentFields
+            method={payMethod}
+            setMethod={setPayMethod}
+            amount={payAmount}
+            setAmount={setPayAmount}
+            total={order.total}
+            amountMatches={amountMatches}
+          />
 
           {payMutation.isError && (
             <p className="text-sm text-red-600">
@@ -200,6 +363,123 @@ export function OrderActions({
         }
       />
     </>
+  )
+}
+
+function OrderSummary({ order }: { order: OrderDetail }) {
+  return (
+    <div className="rounded-lg bg-slate-50 px-4 py-3 text-sm">
+      <p className="font-medium text-slate-700">{orderClientName(order)}</p>
+      <p className="text-slate-500">
+        Total del pedido:{' '}
+        <span className="font-bold text-slate-900">
+          {formatMoney(order.total)}
+        </span>
+      </p>
+    </div>
+  )
+}
+
+function MethodSelector({
+  method,
+  setMethod,
+}: {
+  method: PaymentMethod | ''
+  setMethod: (m: PaymentMethod) => void
+}) {
+  return (
+    <div>
+      <Label>Método de pago *</Label>
+      <div className="grid grid-cols-2 gap-2">
+        {(['transferencia', 'efectivo'] as PaymentMethod[]).map((m) => (
+          <button
+            type="button"
+            key={m}
+            onClick={() => setMethod(m)}
+            className={`rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+              method === m
+                ? 'border-sky-500 bg-sky-50 text-sky-700'
+                : 'border-slate-300 text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            {PAYMENT_LABELS[m]}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function AmountField({
+  amount,
+  setAmount,
+  total,
+  amountMatches,
+}: {
+  amount: string
+  setAmount: (v: string) => void
+  total: number
+  amountMatches: boolean
+}) {
+  return (
+    <div>
+      <Label>Monto recibido *</Label>
+      <TextInput
+        type="number"
+        min="0"
+        step="0.01"
+        value={amount}
+        onChange={(e) => setAmount(e.target.value)}
+        placeholder={String(total)}
+      />
+      {amount.trim() !== '' && !amountMatches && (
+        <p className="mt-1 text-sm text-red-600">
+          El monto debe ser igual al total del pedido ({formatMoney(total)}).
+        </p>
+      )}
+    </div>
+  )
+}
+
+function PaymentFields(props: {
+  method: PaymentMethod | ''
+  setMethod: (m: PaymentMethod) => void
+  amount: string
+  setAmount: (v: string) => void
+  total: number
+  amountMatches: boolean
+}) {
+  return (
+    <>
+      <MethodSelector method={props.method} setMethod={props.setMethod} />
+      <AmountField
+        amount={props.amount}
+        setAmount={props.setAmount}
+        total={props.total}
+        amountMatches={props.amountMatches}
+      />
+    </>
+  )
+}
+
+function UndoIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M9 14 4 9l5-5"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M4 9h11a5 5 0 0 1 5 5v1"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   )
 }
 

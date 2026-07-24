@@ -75,27 +75,63 @@ export async function updateOrderStatus(
   id: string,
   status: OrderStatus
 ): Promise<void> {
-  const { error } = await supabase
-    .from('orders')
-    .update({ status })
-    .eq('id', id)
+  // Al volver a un estado anterior a "pagado" se limpia la info de pago,
+  // para que un pedido marcado por error no quede con método/monto fantasma.
+  // Al volver a "pedido" (deshacer la entrega) también se limpian los bidones
+  // devueltos, porque la entrega en sí queda anulada.
+  const patch: Record<string, unknown> = { status }
+  if (status !== 'paid') {
+    patch.payment_method = null
+    patch.paid_amount = null
+  }
+  if (status === 'ordered') {
+    patch.returned_bidones = null
+  }
+  const { error } = await supabase.from('orders').update(patch).eq('id', id)
   if (error) throw error
 }
 
-/** Marca el pedido como pagado registrando el método y el monto recibido. */
-export async function markOrderPaid(
+/**
+ * Marca el pedido como entregado, guardando los bidones devueltos y el método
+ * de pago acordado. Como aún no pagó, el monto queda en null.
+ */
+export async function markOrderDelivered(
   id: string,
-  paymentMethod: PaymentMethod,
-  paidAmount: number
+  returnedBidones: number,
+  paymentMethod: PaymentMethod
 ): Promise<void> {
   const { error } = await supabase
     .from('orders')
     .update({
-      status: 'paid',
+      status: 'delivered',
+      returned_bidones: returnedBidones,
       payment_method: paymentMethod,
-      paid_amount: paidAmount,
+      paid_amount: null,
     })
     .eq('id', id)
+  if (error) throw error
+}
+
+/**
+ * Marca el pedido como pagado registrando el método y el monto recibido.
+ * `returnedBidones` sólo se envía cuando se entrega y cobra en un mismo paso;
+ * al cobrar un pedido ya entregado se omite para no pisar el valor previo.
+ */
+export async function markOrderPaid(
+  id: string,
+  paymentMethod: PaymentMethod,
+  paidAmount: number,
+  returnedBidones?: number
+): Promise<void> {
+  const patch: Record<string, unknown> = {
+    status: 'paid',
+    payment_method: paymentMethod,
+    paid_amount: paidAmount,
+  }
+  if (returnedBidones !== undefined) {
+    patch.returned_bidones = returnedBidones
+  }
+  const { error } = await supabase.from('orders').update(patch).eq('id', id)
   if (error) throw error
 }
 

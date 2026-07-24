@@ -61,7 +61,7 @@ export function orderTemplateContext(
   return {
     cliente: order.client
       ? `${order.client.name} ${order.client.surname}`.trim()
-      : 'Cliente',
+      : order.customer_name?.trim() || 'Cliente',
     empresa: companyName || FALLBACK_COMPANY,
     telefono: order.client?.phone ?? '',
     direccion: addressText(order.address),
@@ -120,7 +120,7 @@ export function buildChargeMessage(
 ): string {
   const clientName = order.client
     ? `${order.client.name} ${order.client.surname}`.trim()
-    : 'Cliente'
+    : order.customer_name?.trim() || 'Cliente'
 
   const lines: string[] = []
   lines.push(`Hola ${clientName}, le saluda *${companyName || FALLBACK_COMPANY}*.`)

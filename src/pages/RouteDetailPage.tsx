@@ -16,30 +16,36 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
   addOrderToRoute,
+  addQuickSale,
   getRoute,
   listAssignableOrders,
   removeStop,
   reorderStops,
 } from '../api/routes'
+import { listProducts } from '../api/products'
 import type { OrderDetail, RouteStopWithOrder } from '../types/db'
 import { useAuth } from '../lib/auth'
 import { useIsMobile } from '../lib/useIsMobile'
 import { formatDateOnly, formatMoney } from '../lib/format'
+import { orderClientName, returnedBidonesText } from '../lib/order'
+import { OrderItemsList } from '../components/OrderItems'
 import { Modal } from '../components/Modal'
 import { OrderActions } from '../components/OrderActions'
-import { StatusBadge } from '../components/StatusBadge'
+import { PAYMENT_LABELS, StatusBadge } from '../components/StatusBadge'
 import {
   Button,
   CallButton,
   Card,
   CopyButton,
   EmptyState,
+  Label,
   MapButton,
   Spinner,
+  TextInput,
 } from '../components/ui'
 
 function stopAddress(stop: RouteStopWithOrder): string {
@@ -74,6 +80,16 @@ export default function RouteDetailPage() {
     enabled: canManage,
   })
 
+  const { data: products } = useQuery({
+    queryKey: ['products'],
+    queryFn: listProducts,
+  })
+  const productMap = useMemo(() => {
+    const m = new Map<string, number>()
+    products?.forEach((p) => m.set(p.id, p.price))
+    return m
+  }, [products])
+
   // Copia local de las paradas para reordenar de forma instantánea (optimista).
   const [items, setItems] = useState<RouteStopWithOrder[]>([])
   useEffect(() => {
@@ -81,6 +97,20 @@ export default function RouteDetailPage() {
   }, [route?.stops])
 
   const [addOpen, setAddOpen] = useState(false)
+
+  // Venta rápida (sólo nombre + productos).
+  const [quickOpen, setQuickOpen] = useState(false)
+  const [quickName, setQuickName] = useState('')
+  const [quickItems, setQuickItems] = useState<
+    { product_id: string; quantity: number }[]
+  >([{ product_id: '', quantity: 1 }])
+  const quickTotal = quickItems.reduce(
+    (s, it) => s + it.quantity * (productMap.get(it.product_id) ?? 0),
+    0
+  )
+  const quickValid =
+    quickItems.filter((it) => it.product_id && it.quantity > 0).length > 0
+  const canQuickSave = Boolean(quickName.trim() && quickValid)
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -109,6 +139,31 @@ export default function RouteDetailPage() {
     mutationFn: (stopId: string) => removeStop(stopId),
     onSuccess: invalidateRoute,
   })
+
+  const quickSaleMutation = useMutation({
+    mutationFn: () =>
+      addQuickSale(
+        id,
+        quickName.trim(),
+        quickItems.filter((it) => it.product_id && it.quantity > 0)
+      ),
+    onSuccess: () => {
+      invalidateRoute()
+      setQuickOpen(false)
+    },
+  })
+
+  function openQuick() {
+    setQuickName('')
+    setQuickItems([{ product_id: '', quantity: 1 }])
+    setQuickOpen(true)
+  }
+
+  function updateQuickItem(i: number, patch: Partial<{ product_id: string; quantity: number }>) {
+    setQuickItems((list) =>
+      list.map((it, idx) => (idx === i ? { ...it, ...patch } : it))
+    )
+  }
 
   const pending = items.filter(isPending)
   const done = items.filter((s) => !isPending(s))
@@ -167,9 +222,14 @@ export default function RouteDetailPage() {
             </p>
           )}
         </div>
-        {canManage && (
-          <Button onClick={() => setAddOpen(true)}>+ Agregar pedido</Button>
-        )}
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <Button variant="success" onClick={openQuick}>
+            ⚡ Venta rápida
+          </Button>
+          {canManage && (
+            <Button onClick={() => setAddOpen(true)}>+ Agregar pedido</Button>
+          )}
+        </div>
       </div>
 
       {items.length === 0 ? (
@@ -272,7 +332,7 @@ export default function RouteDetailPage() {
                 <Card className="overflow-hidden">
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
-                      <StopsTableHead />
+                      <StopsTableHead showReturned />
                       <tbody>
                         {done.map((stop) => (
                           <StaticStopRow
@@ -305,21 +365,153 @@ export default function RouteDetailPage() {
           isPending={addMutation.isPending}
         />
       </Modal>
+
+      {/* --- Venta rápida --- */}
+      <Modal
+        open={quickOpen}
+        onClose={() => setQuickOpen(false)}
+        title="Venta rápida"
+        wide
+      >
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (canQuickSave) quickSaleMutation.mutate()
+          }}
+          className="space-y-4"
+        >
+          <div>
+            <Label>Nombre del cliente *</Label>
+            <TextInput
+              value={quickName}
+              onChange={(e) => setQuickName(e.target.value)}
+              placeholder="Ej: Señora del kiosco"
+              autoFocus
+            />
+          </div>
+
+          <div>
+            <div className="mb-1 flex items-center justify-between">
+              <Label>Productos *</Label>
+              <button
+                type="button"
+                onClick={() =>
+                  setQuickItems((l) => [...l, { product_id: '', quantity: 1 }])
+                }
+                className="text-sm font-medium text-sky-600 hover:text-sky-700"
+              >
+                + Agregar producto
+              </button>
+            </div>
+            <div className="space-y-2">
+              {quickItems.map((it, i) => {
+                const price = productMap.get(it.product_id) ?? 0
+                return (
+                  <div key={i} className="flex items-center gap-2">
+                    <select
+                      value={it.product_id}
+                      onChange={(e) =>
+                        updateQuickItem(i, { product_id: e.target.value })
+                      }
+                      className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-sky-500"
+                    >
+                      <option value="">Producto…</option>
+                      {products?.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} ({formatMoney(p.price)})
+                        </option>
+                      ))}
+                    </select>
+                    <div className="w-16 shrink-0">
+                      <TextInput
+                        type="number"
+                        min="1"
+                        inputMode="numeric"
+                        value={it.quantity}
+                        onChange={(e) =>
+                          updateQuickItem(i, {
+                            quantity: Math.max(1, Number(e.target.value) || 1),
+                          })
+                        }
+                        className="text-center"
+                      />
+                    </div>
+                    <span className="w-24 shrink-0 text-right text-sm font-medium text-slate-600">
+                      {formatMoney(price * it.quantity)}
+                    </span>
+                    {quickItems.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setQuickItems((l) => l.filter((_, idx) => idx !== i))
+                        }
+                        className="shrink-0 rounded-lg px-2 text-slate-400 hover:bg-slate-100 hover:text-red-600"
+                        aria-label="Quitar producto"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between border-t border-slate-100 pt-3">
+            <span className="text-sm text-slate-500">Total</span>
+            <span className="text-xl font-bold text-slate-900">
+              {formatMoney(quickTotal)}
+            </span>
+          </div>
+
+          {quickSaleMutation.isError && (
+            <p className="text-sm text-red-600">
+              Error: {(quickSaleMutation.error as Error).message}
+            </p>
+          )}
+
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setQuickOpen(false)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="submit"
+              variant="success"
+              disabled={!canQuickSave || quickSaleMutation.isPending}
+            >
+              {quickSaleMutation.isPending ? 'Guardando…' : 'Vender y agregar'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
     </div>
   )
 }
 
-function StopsTableHead({ sortable = false }: { sortable?: boolean }) {
+function StopsTableHead({
+  sortable = false,
+  showReturned = false,
+}: {
+  sortable?: boolean
+  showReturned?: boolean
+}) {
   return (
     <thead>
       <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase text-slate-500">
         <th className="w-8 px-2 py-2">{sortable ? '' : '✓'}</th>
         <th className="w-8 px-2 py-2">#</th>
         <th className="px-3 py-2">Cliente</th>
+        <th className="px-3 py-2">Productos</th>
         <th className="px-3 py-2">Dirección</th>
         <th className="px-3 py-2">Teléfono</th>
         <th className="px-3 py-2 text-right">Total</th>
         <th className="px-3 py-2">Estado</th>
+        {showReturned && <th className="px-3 py-2">Método</th>}
+        {showReturned && <th className="px-3 py-2 text-center">Devueltos</th>}
         <th className="px-3 py-2">Acciones</th>
         <th className="w-10 px-2 py-2"></th>
       </tr>
@@ -333,19 +525,22 @@ function StopCells({
   canManage,
   onChanged,
   onRemove,
+  showReturned = false,
 }: {
   stop: RouteStopWithOrder
   canManage: boolean
   onChanged: () => void
   onRemove: () => void
+  showReturned?: boolean
 }) {
   const order = stop.order
-  const clientName = order?.client
-    ? `${order.client.name} ${order.client.surname}`
-    : 'Pedido'
+  const clientName = order ? orderClientName(order) : 'Pedido'
   return (
     <>
       <td className="px-3 py-2 font-medium text-slate-800">{clientName}</td>
+      <td className="px-3 py-2 text-slate-600">
+        {order ? <OrderItemsList items={order.items} /> : '—'}
+      </td>
       <td className="px-3 py-2 text-slate-600">
         <div className="flex items-center gap-1">
           <span className="min-w-0">{stopAddress(stop)}</span>
@@ -377,6 +572,16 @@ function StopCells({
       <td className="px-3 py-2">
         {order && <StatusBadge status={order.status} />}
       </td>
+      {showReturned && (
+        <td className="px-3 py-2 text-slate-700">
+          {order?.payment_method ? PAYMENT_LABELS[order.payment_method] : '—'}
+        </td>
+      )}
+      {showReturned && (
+        <td className="px-3 py-2 text-center tabular-nums text-slate-700">
+          {order ? returnedBidonesText(order) : '—'}
+        </td>
+      )}
       <td className="px-3 py-2">
         {order && (
           <OrderActions
@@ -473,6 +678,7 @@ function StaticStopRow({
         canManage={canManage}
         onChanged={onChanged}
         onRemove={onRemove}
+        showReturned
       />
     </tr>
   )
@@ -497,9 +703,7 @@ function StopCardInner({
   orderNo?: number
 }) {
   const order = stop.order
-  const clientName = order?.client
-    ? `${order.client.name} ${order.client.surname}`
-    : 'Pedido'
+  const clientName = order ? orderClientName(order) : 'Pedido'
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
       <div className="flex items-start gap-2">
@@ -514,6 +718,12 @@ function StopCardInner({
             </span>
             {order && <StatusBadge status={order.status} />}
           </div>
+          {order && order.items.length > 0 && (
+            <div className="mt-1.5 flex items-start gap-2 text-sm">
+              <span aria-hidden>📦</span>
+              <OrderItemsList items={order.items} className="min-w-0" />
+            </div>
+          )}
           <div className="mt-1 flex items-start gap-2 text-sm text-slate-600">
             <span aria-hidden>📍</span>
             <span className="min-w-0 flex-1 break-words">{stopAddress(stop)}</span>
@@ -533,6 +743,20 @@ function StopCardInner({
               <span className="flex-1">{order.client.phone}</span>
               <CallButton phone={order.client.phone} />
               <CopyButton value={order.client.phone} label="Copiar teléfono" />
+            </div>
+          )}
+          {order &&
+            order.status !== 'ordered' &&
+            order.returned_bidones != null && (
+              <div className="mt-0.5 flex items-center gap-2 text-sm text-slate-600">
+                <span aria-hidden>↩</span>
+                <span>{order.returned_bidones} bidones devueltos</span>
+              </div>
+            )}
+          {order?.status === 'delivered' && order.payment_method && (
+            <div className="mt-0.5 flex items-center gap-2 text-sm text-slate-600">
+              <span aria-hidden>💳</span>
+              <span>Método: {PAYMENT_LABELS[order.payment_method]}</span>
             </div>
           )}
         </div>

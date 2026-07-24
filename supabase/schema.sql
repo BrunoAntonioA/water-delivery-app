@@ -122,6 +122,11 @@ create index if not exists orders_status_idx on orders (status);
 -- Migración para bases de datos que ya tenían la tabla "orders" sin estas columnas.
 alter table orders add column if not exists payment_method payment_method;
 alter table orders add column if not exists paid_amount numeric(12, 2);
+-- Venta rápida: pedido con sólo un nombre (sin cliente registrado).
+alter table orders add column if not exists customer_name text;
+alter table orders alter column client_id drop not null;
+-- Bidones que el cliente devolvió al momento de la entrega.
+alter table orders add column if not exists returned_bidones integer;
 
 -- ----------------------------------------------------------------------------
 --  Ítems del pedido (un pedido tiene varios productos)
@@ -245,6 +250,70 @@ returns boolean language sql stable security definer set search_path = public as
   )
 $$;
 
+-- Venta rápida: crea un pedido (sin cliente registrado, sólo un nombre) con los
+-- productos indicados y lo agrega como parada de la ruta, en una sola operación.
+-- SECURITY DEFINER evita las restricciones de RLS del repartidor, pero valida
+-- que la ruta sea de su empresa (y suya si es repartidor).
+-- p_items: [{"product_id": "uuid", "quantity": 2}, ...]
+create or replace function public.add_quick_sale(
+  p_route_id uuid,
+  p_customer_name text,
+  p_items jsonb
+) returns uuid
+language plpgsql security definer set search_path = public as $$
+declare
+  v_company uuid;
+  v_driver  uuid;
+  v_order   uuid;
+  v_total   numeric := 0;
+  v_pos     int;
+  it        jsonb;
+  v_price   numeric;
+  v_qty     int;
+  v_pid     uuid;
+begin
+  select company_id, driver_id into v_company, v_driver
+    from routes where id = p_route_id;
+  if v_company is null then
+    raise exception 'Ruta no encontrada';
+  end if;
+  if v_company <> current_company_id() then
+    raise exception 'No autorizado';
+  end if;
+  if current_user_role() = 'repartidor'
+     and v_driver is distinct from auth.uid() then
+    raise exception 'No autorizado';
+  end if;
+
+  insert into orders (company_id, client_id, customer_name, status, total)
+  values (v_company, null, nullif(trim(p_customer_name), ''), 'ordered', 0)
+  returning id into v_order;
+
+  for it in select * from jsonb_array_elements(coalesce(p_items, '[]'::jsonb))
+  loop
+    v_pid := (it ->> 'product_id')::uuid;
+    v_qty := greatest(1, coalesce((it ->> 'quantity')::int, 1));
+    select price into v_price
+      from products where id = v_pid and company_id = v_company;
+    if v_price is null then
+      raise exception 'Producto inválido';
+    end if;
+    insert into order_items (company_id, order_id, product_id, quantity, unit_price)
+    values (v_company, v_order, v_pid, v_qty, v_price);
+    v_total := v_total + v_qty * v_price;
+  end loop;
+
+  update orders set total = v_total where id = v_order;
+
+  select count(*) into v_pos from route_stops where route_id = p_route_id;
+  insert into route_stops (company_id, route_id, order_id, position)
+  values (v_company, p_route_id, v_order, v_pos);
+
+  return v_order;
+end$$;
+
+grant execute on function public.add_quick_sale(uuid, text, jsonb) to authenticated;
+
 -- ----------------------------------------------------------------------------
 --  Agregar company_id a todas las tablas de datos. El default lo llena solo
 --  con la empresa del usuario que inserta, así el frontend no tiene que enviarlo.
@@ -354,15 +423,25 @@ create policy "tenant_route_stops" on route_stops for all
     and (current_user_role() <> 'repartidor' or is_my_route(route_id))
   );
 
--- Pedidos: acceso a los pedidos de la empresa (todos los roles, incluido el
--- repartidor, para que pueda crear pedidos). El aislamiento del repartidor se
--- mantiene en las rutas (routes / route_stops), no en los pedidos.
+-- Pedidos: el repartidor sólo ve los pedidos que están en sus rutas.
 create policy "tenant_orders" on orders for all
-  using (company_id = current_company_id())
-  with check (company_id = current_company_id());
+  using (
+    company_id = current_company_id()
+    and (current_user_role() <> 'repartidor' or order_in_my_route(id))
+  )
+  with check (
+    company_id = current_company_id()
+    and (current_user_role() <> 'repartidor' or order_in_my_route(id))
+  );
 create policy "tenant_order_items" on order_items for all
-  using (company_id = current_company_id())
-  with check (company_id = current_company_id());
+  using (
+    company_id = current_company_id()
+    and (current_user_role() <> 'repartidor' or order_in_my_route(order_id))
+  )
+  with check (
+    company_id = current_company_id()
+    and (current_user_role() <> 'repartidor' or order_in_my_route(order_id))
+  );
 
 -- Empresas: el superadmin administra todas; cada usuario lee la suya; el admin
 -- puede renombrar la suya.

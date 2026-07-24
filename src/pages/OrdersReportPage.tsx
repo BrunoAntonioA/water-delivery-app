@@ -4,6 +4,7 @@ import { listOrders } from '../api/orders'
 import { listClients } from '../api/clients'
 import type { OrderDetail, OrderStatus } from '../types/db'
 import { formatDate, formatMoney, toLocalDateStr } from '../lib/format'
+import { orderClientName } from '../lib/order'
 import { ClientCombobox } from '../components/ClientCombobox'
 import {
   PAYMENT_LABELS,
@@ -102,7 +103,7 @@ export default function OrdersReportPage() {
 
     const rowOf = (o: OrderDetail) => [
       formatDate(o.created_at),
-      o.client ? `${o.client.name} ${o.client.surname}`.trim() : '',
+      orderClientName(o),
       o.client?.phone ?? '',
       o.address
         ? [o.address.address, o.address.comuna].filter(Boolean).join(', ')
@@ -274,9 +275,7 @@ export default function OrdersReportPage() {
                           {formatDate(o.created_at)}
                         </td>
                         <td className="px-3 py-2 font-medium text-slate-800">
-                          {o.client
-                            ? `${o.client.name} ${o.client.surname}`
-                            : 'Cliente eliminado'}
+                          {orderClientName(o)}
                         </td>
                         <td className="px-3 py-2 text-center text-slate-600">
                           {itemCount}

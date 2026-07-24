@@ -14,6 +14,8 @@ interface AuthState {
   profile: Profile | null
   company: Company | null
   loading: boolean
+  /** true mientras se está cargando el perfil de una sesión existente. */
+  profileLoading: boolean
   signIn: (email: string, password: string) => Promise<void>
   signOut: () => Promise<void>
   reloadProfile: () => Promise<void>
@@ -48,6 +50,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null)
   const [company, setCompany] = useState<Company | null>(null)
   const [loading, setLoading] = useState(true)
+  const [profileLoading, setProfileLoading] = useState(false)
 
   async function loadProfileFor(userId: string | undefined) {
     if (!userId) {
@@ -55,9 +58,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setCompany(null)
       return
     }
-    const p = await fetchProfile(userId)
-    setProfile(p)
-    setCompany(p?.company_id ? await fetchCompany(p.company_id) : null)
+    setProfileLoading(true)
+    try {
+      const p = await fetchProfile(userId)
+      setProfile(p)
+      setCompany(p?.company_id ? await fetchCompany(p.company_id) : null)
+    } finally {
+      setProfileLoading(false)
+    }
   }
 
   useEffect(() => {
@@ -96,7 +104,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ session, profile, company, loading, signIn, signOut, reloadProfile }}
+      value={{
+        session,
+        profile,
+        company,
+        loading,
+        profileLoading,
+        signIn,
+        signOut,
+        reloadProfile,
+      }}
     >
       {children}
     </AuthContext.Provider>

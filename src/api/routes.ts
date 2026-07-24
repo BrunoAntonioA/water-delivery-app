@@ -139,6 +139,29 @@ export async function deleteRoute(id: string): Promise<void> {
   if (error) throw error
 }
 
+export interface QuickSaleItem {
+  product_id: string
+  quantity: number
+}
+
+/**
+ * Venta rápida: crea un pedido (sólo con un nombre, sin cliente registrado) con
+ * los productos indicados y lo agrega a la ruta de inmediato. Usa una función
+ * de la base de datos (RPC) para hacerlo en una sola operación segura.
+ */
+export async function addQuickSale(
+  routeId: string,
+  customerName: string,
+  items: QuickSaleItem[]
+): Promise<void> {
+  const { error } = await supabase.rpc('add_quick_sale', {
+    p_route_id: routeId,
+    p_customer_name: customerName,
+    p_items: items,
+  })
+  if (error) throw error
+}
+
 /** Agrega un pedido al final de la ruta. */
 export async function addOrderToRoute(
   routeId: string,
