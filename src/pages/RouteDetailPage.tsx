@@ -147,9 +147,25 @@ export default function RouteDetailPage() {
         quickName.trim(),
         quickItems.filter((it) => it.product_id && it.quantity > 0)
       ),
-    onSuccess: () => {
-      invalidateRoute()
+    onSuccess: async (newOrderId) => {
       setQuickOpen(false)
+      // La venta rápida se agrega al final; la movemos al inicio de "Por
+      // entregar" y persistimos ese orden (igual que un arrastre).
+      const fresh = await qc.fetchQuery({
+        queryKey: ['route', id],
+        queryFn: () => getRoute(id),
+      })
+      const freshPending = fresh.stops.filter(isPending)
+      const freshDone = fresh.stops.filter((s) => !isPending(s))
+      const newStop = freshPending.find((s) => s.order?.id === newOrderId)
+      if (newStop) {
+        const rest = freshPending.filter((s) => s.id !== newStop.id)
+        const next = [newStop, ...rest, ...freshDone]
+        setItems(next)
+        reorderMutation.mutate(next.map((s) => s.id))
+      }
+      qc.invalidateQueries({ queryKey: ['assignable-orders'] })
+      qc.invalidateQueries({ queryKey: ['routes'] })
     },
   })
 

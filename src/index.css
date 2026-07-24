@@ -4,6 +4,14 @@
   color-scheme: light;
 }
 
+/* Red de seguridad: ningún elemento ancho debe forzar scroll/zoom horizontal en
+ * el teléfono. `clip` (no `hidden`) evita romper el header sticky. */
+html,
+body {
+  overflow-x: clip;
+  max-width: 100%;
+}
+
 body {
   margin: 0;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial,

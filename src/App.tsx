@@ -151,13 +151,13 @@ export default function App() {
             </svg>
           </button>
 
-          <div className="flex items-center gap-2 font-bold text-slate-900">
+          <div className="flex min-w-0 flex-1 items-center gap-2 font-bold text-slate-900">
             <span className="text-xl">💧</span>
-            <span>{company?.name ?? 'AquaGestión'}</span>
+            <span className="truncate">{company?.name ?? 'AquaGestión'}</span>
           </div>
 
           {/* Usuario + salir a la derecha */}
-          <div className="ml-auto flex items-center gap-3 text-sm">
+          <div className="flex shrink-0 items-center gap-3 text-sm">
             <div className="hidden text-right sm:block">
               <p className="font-medium text-slate-700">
                 {profile.full_name || profile.email}
@@ -284,7 +284,7 @@ export default function App() {
           />
           <aside className="absolute inset-y-0 left-0 flex w-64 flex-col overflow-y-auto bg-white p-3 shadow-xl">
             <div className="mb-3 flex items-center justify-between">
-              <span className="truncate font-bold text-slate-900">
+              <span className="min-w-0 break-words font-bold text-slate-900">
                 💧 {company?.name ?? 'AquaGestión'}
               </span>
               <button

@@ -153,13 +153,14 @@ export async function addQuickSale(
   routeId: string,
   customerName: string,
   items: QuickSaleItem[]
-): Promise<void> {
-  const { error } = await supabase.rpc('add_quick_sale', {
+): Promise<string> {
+  const { data, error } = await supabase.rpc('add_quick_sale', {
     p_route_id: routeId,
     p_customer_name: customerName,
     p_items: items,
   })
   if (error) throw error
+  return data as string
 }
 
 /** Agrega un pedido al final de la ruta. */
