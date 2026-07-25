@@ -32,14 +32,23 @@ export interface CostInput {
   amount: number
 }
 
+type CreatorProfile = { full_name: string | null; email: string | null } | null
+
 export async function listCosts(): Promise<CostWithCategory[]> {
   const { data, error } = await supabase
     .from('costs')
-    .select('*, category:cost_categories(*)')
+    .select(
+      '*, category:cost_categories(*), creator:profiles!created_by(full_name, email)'
+    )
     .order('issue_date', { ascending: false })
     .order('created_at', { ascending: false })
   if (error) throw error
-  return (data ?? []) as CostWithCategory[]
+  return ((data ?? []) as (CostWithCategory & { creator: CreatorProfile })[]).map(
+    ({ creator, ...rest }) => ({
+      ...rest,
+      creatorName: creator?.full_name || creator?.email || null,
+    })
+  )
 }
 
 export async function createCost(input: CostInput): Promise<void> {

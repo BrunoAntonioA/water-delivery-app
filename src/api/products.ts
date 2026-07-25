@@ -6,6 +6,7 @@ export interface ProductInput {
   description: string
   price: number
   image_url: string | null
+  supply_id: string | null
 }
 
 export async function listProducts(): Promise<Product[]> {
@@ -23,6 +24,7 @@ export async function createProduct(input: ProductInput): Promise<void> {
     description: input.description || null,
     price: input.price,
     image_url: input.image_url,
+    supply_id: input.supply_id,
   })
   if (error) throw error
 }
@@ -38,6 +40,7 @@ export async function updateProduct(
       description: input.description || null,
       price: input.price,
       image_url: input.image_url,
+      supply_id: input.supply_id,
     })
     .eq('id', id)
   if (error) throw error

@@ -10,6 +10,7 @@ import OrdersReportPage from './pages/OrdersReportPage'
 import DeliveriesSummaryPage from './pages/DeliveriesSummaryPage'
 import RoutesPage from './pages/RoutesPage'
 import RouteDetailPage from './pages/RouteDetailPage'
+import RouteLoadPage from './pages/RouteLoadPage'
 import CostsPage from './pages/CostsPage'
 import CompanyDetailPage from './pages/CompanyDetailPage'
 import TemplatesPage from './pages/TemplatesPage'
@@ -221,6 +222,14 @@ export default function App() {
             element={
               <Protected module="rutas" home={home}>
                 <RouteDetailPage />
+              </Protected>
+            }
+          />
+          <Route
+            path="/rutas/:id/carga"
+            element={
+              <Protected module="rutas" home={home}>
+                <RouteLoadPage />
               </Protected>
             }
           />

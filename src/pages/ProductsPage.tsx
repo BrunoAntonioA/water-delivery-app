@@ -8,6 +8,7 @@ import {
   uploadProductImage,
   type ProductInput,
 } from '../api/products'
+import { createSupply, listSupplies } from '../api/supplies'
 import type { Product } from '../types/db'
 import { formatMoney } from '../lib/format'
 import { Modal } from '../components/Modal'
@@ -30,6 +31,8 @@ interface FormState {
   description: string
   price: string
   image_url: string | null
+  supply_id: string // '' = sin insumo, '__new__' = crear uno nuevo
+  newSupply: string
 }
 
 const emptyForm: FormState = {
@@ -37,6 +40,8 @@ const emptyForm: FormState = {
   description: '',
   price: '',
   image_url: null,
+  supply_id: '',
+  newSupply: '',
 }
 
 export default function ProductsPage() {
@@ -44,6 +49,10 @@ export default function ProductsPage() {
   const { data: products, isLoading } = useQuery({
     queryKey: ['products'],
     queryFn: listProducts,
+  })
+  const { data: supplies } = useQuery({
+    queryKey: ['supplies'],
+    queryFn: listSupplies,
   })
 
   const [modalOpen, setModalOpen] = useState(false)
@@ -63,17 +72,26 @@ export default function ProductsPage() {
   const invalidate = () => qc.invalidateQueries({ queryKey: ['products'] })
 
   const saveMutation = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
+      // Resolver el insumo: existente, ninguno, o crear uno nuevo al vuelo.
+      let supplyId: string | null = form.supply_id || null
+      if (form.supply_id === '__new__') {
+        supplyId = form.newSupply.trim()
+          ? await createSupply(form.newSupply.trim())
+          : null
+      }
       const input: ProductInput = {
         name: form.name.trim(),
         description: form.description.trim(),
         price: Number(form.price) || 0,
         image_url: form.image_url,
+        supply_id: supplyId,
       }
       return editing ? updateProduct(editing.id, input) : createProduct(input)
     },
     onSuccess: () => {
       invalidate()
+      qc.invalidateQueries({ queryKey: ['supplies'] })
       setModalOpen(false)
     },
   })
@@ -96,6 +114,8 @@ export default function ProductsPage() {
       description: p.description ?? '',
       price: String(p.price),
       image_url: p.image_url,
+      supply_id: p.supply_id ?? '',
+      newSupply: '',
     })
     setModalOpen(true)
   }
@@ -114,7 +134,10 @@ export default function ProductsPage() {
     }
   }
 
-  const canSave = form.name.trim() && Number(form.price) >= 0
+  const canSave =
+    form.name.trim() &&
+    Number(form.price) >= 0 &&
+    (form.supply_id !== '__new__' || form.newSupply.trim().length > 0)
 
   return (
     <div>
@@ -231,6 +254,37 @@ export default function ProductsPage() {
               onChange={(e) => setForm({ ...form, price: e.target.value })}
               required
             />
+          </div>
+
+          <div>
+            <Label>Insumo (para la carga de ruta)</Label>
+            <select
+              value={form.supply_id}
+              onChange={(e) => setForm({ ...form, supply_id: e.target.value })}
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+            >
+              <option value="">Sin insumo</option>
+              {supplies?.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+              <option value="__new__">➕ Crear nuevo insumo…</option>
+            </select>
+            {form.supply_id === '__new__' && (
+              <TextInput
+                className="mt-2"
+                value={form.newSupply}
+                onChange={(e) =>
+                  setForm({ ...form, newSupply: e.target.value })
+                }
+                placeholder="Nombre del insumo (ej: Agua 5 galones)"
+              />
+            )}
+            <p className="mt-1 text-xs text-slate-400">
+              Varios productos pueden compartir el mismo insumo; la carga de la
+              ruta se lleva por insumo.
+            </p>
           </div>
 
           <div>

@@ -180,6 +180,9 @@ export default function RouteDetailPage() {
   const pending = items.filter(isPending)
   const done = items.filter((s) => !isPending(s))
 
+  // Al repartidor se le ocultan los pedidos hasta registrar la carga inicial.
+  const loadBlocked = isRepartidor && !route?.load_confirmed
+
   function onDragEnd(event: DragEndEvent) {
     const { active, over } = event
     if (!over || active.id === over.id) return
@@ -235,16 +238,30 @@ export default function RouteDetailPage() {
           )}
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
-          <Button variant="success" onClick={openQuick}>
-            ⚡ Venta rápida
-          </Button>
+          <Link to={`/rutas/${id}/carga`}>
+            <Button variant="secondary">🛒 Ver carga</Button>
+          </Link>
+          {!loadBlocked && (
+            <Button variant="success" onClick={openQuick}>
+              ⚡ Venta rápida
+            </Button>
+          )}
           {canManage && (
             <Button onClick={() => setAddOpen(true)}>+ Agregar pedido</Button>
           )}
         </div>
       </div>
 
-      {items.length === 0 ? (
+      {loadBlocked ? (
+        <Card className="flex flex-col items-start gap-3 p-4">
+          <p className="text-sm text-slate-600">
+            🔒 Registra la carga inicial de la ruta para ver los pedidos.
+          </p>
+          <Link to={`/rutas/${id}/carga`}>
+            <Button>Registrar carga</Button>
+          </Link>
+        </Card>
+      ) : items.length === 0 ? (
         <EmptyState>
           {canManage
             ? 'Esta ruta no tiene pedidos. Agrega el primero con “Agregar pedido”.'

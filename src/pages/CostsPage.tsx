@@ -11,6 +11,7 @@ import {
   type CostInput,
 } from '../api/costs'
 import type { CostWithCategory } from '../types/db'
+import { useAuth } from '../lib/auth'
 import { formatMoney } from '../lib/format'
 import { Modal } from '../components/Modal'
 import {
@@ -59,6 +60,8 @@ const emptyForm = (): FormState => ({
 
 export default function CostsPage() {
   const qc = useQueryClient()
+  const { profile } = useAuth()
+  const isRepartidor = profile?.role === 'repartidor'
   const { data: costs, isLoading } = useQuery({
     queryKey: ['costs'],
     queryFn: listCosts,
@@ -79,6 +82,19 @@ export default function CostsPage() {
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('')
+  // userFilter: '' = todos, o un id de usuario (sólo para admin/operador).
+  const [userFilter, setUserFilter] = useState('')
+
+  // Usuarios que aparecen como autores de algún costo (para el filtro).
+  const creators = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const c of costs ?? []) {
+      if (c.created_by) m.set(c.created_by, c.creatorName || 'Sin nombre')
+    }
+    return Array.from(m, ([id, name]) => ({ id, name })).sort((a, b) =>
+      a.name.localeCompare(b.name)
+    )
+  }, [costs])
 
   const invalidateCosts = () =>
     qc.invalidateQueries({ queryKey: ['costs'] })
@@ -145,11 +161,12 @@ export default function CostsPage() {
     return (costs ?? []).filter((c) => {
       if (fromDate && c.issue_date < fromDate) return false
       if (toDate && c.issue_date > toDate) return false
+      if (userFilter && c.created_by !== userFilter) return false
       if (categoryFilter === '') return true
       if (categoryFilter === '__none__') return c.category_id == null
       return c.category_id === categoryFilter
     })
-  }, [costs, fromDate, toDate, categoryFilter])
+  }, [costs, fromDate, toDate, categoryFilter, userFilter])
 
   const totalSum = useMemo(
     () => filtered.reduce((s, c) => s + Number(c.amount), 0),
@@ -163,11 +180,12 @@ export default function CostsPage() {
     currentPage * PAGE_SIZE
   )
 
-  const hasFilters = Boolean(fromDate || toDate || categoryFilter)
+  const hasFilters = Boolean(fromDate || toDate || categoryFilter || userFilter)
   function clearFilters() {
     setFromDate('')
     setToDate('')
     setCategoryFilter('')
+    setUserFilter('')
     setPage(1)
   }
 
@@ -180,9 +198,11 @@ export default function CostsPage() {
         subtitle="Registra los costos del negocio y clasifícalos por categoría."
         action={
           <div className="flex gap-2">
-            <Button variant="secondary" onClick={() => setCatModalOpen(true)}>
-              Categorías
-            </Button>
+            {!isRepartidor && (
+              <Button variant="secondary" onClick={() => setCatModalOpen(true)}>
+                Categorías
+              </Button>
+            )}
             <Button onClick={openNew}>+ Nuevo costo</Button>
           </div>
         }
@@ -238,6 +258,26 @@ export default function CostsPage() {
               ))}
             </select>
           </div>
+          {!isRepartidor && (
+            <div>
+              <Label>Agregado por</Label>
+              <select
+                value={userFilter}
+                onChange={(e) => {
+                  setUserFilter(e.target.value)
+                  setPage(1)
+                }}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-sky-500"
+              >
+                <option value="">Todos los usuarios</option>
+                {creators.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
         {hasFilters && (
           <div className="mt-3">
@@ -276,6 +316,9 @@ export default function CostsPage() {
                     <th className="px-3 py-2">Fecha</th>
                     <th className="px-3 py-2">Nombre</th>
                     <th className="px-3 py-2">Categoría</th>
+                    {!isRepartidor && (
+                      <th className="px-3 py-2">Agregado por</th>
+                    )}
                     <th className="px-3 py-2">Descripción</th>
                     <th className="px-3 py-2 text-right">Monto</th>
                     <th className="w-px px-3 py-2"></th>
@@ -296,6 +339,11 @@ export default function CostsPage() {
                       <td className="px-3 py-2 text-slate-600">
                         {c.category?.name ?? 'Sin categoría'}
                       </td>
+                      {!isRepartidor && (
+                        <td className="px-3 py-2 text-slate-600">
+                          {c.creatorName ?? '—'}
+                        </td>
+                      )}
                       <td className="px-3 py-2 text-slate-500">
                         {c.description || '—'}
                       </td>

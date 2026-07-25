@@ -74,7 +74,7 @@ export async function getRoute(id: string): Promise<RouteDetail> {
   const { data, error } = await supabase
     .from('routes')
     .select(
-      `*, stops:route_stops(*, ${ORDER_SELECT}), driver_profile:profiles!driver_id(full_name, email)`
+      `*, stops:route_stops(*, ${ORDER_SELECT}), loads:route_loads(*), driver_profile:profiles!driver_id(full_name, email)`
     )
     .eq('id', id)
     .single()
@@ -186,6 +186,45 @@ export async function addOrderToRoute(
 export async function removeStop(stopId: string): Promise<void> {
   const { error } = await supabase.from('route_stops').delete().eq('id', stopId)
   if (error) throw error
+}
+
+export interface RouteLoadInput {
+  supply_id: string
+  quantity: number
+}
+
+/**
+ * Guarda la carga inicial de la ruta (por insumo, reemplaza la anterior) y marca
+ * la carga como confirmada, para que el repartidor pueda ver los pedidos.
+ */
+export async function saveRouteLoads(
+  routeId: string,
+  items: RouteLoadInput[]
+): Promise<void> {
+  // Reemplazo total: borramos la carga previa y volvemos a insertar.
+  const { error: delErr } = await supabase
+    .from('route_loads')
+    .delete()
+    .eq('route_id', routeId)
+  if (delErr) throw delErr
+
+  const rows = items
+    .filter((it) => it.supply_id && it.quantity > 0)
+    .map((it) => ({
+      route_id: routeId,
+      supply_id: it.supply_id,
+      quantity: it.quantity,
+    }))
+  if (rows.length > 0) {
+    const { error: insErr } = await supabase.from('route_loads').insert(rows)
+    if (insErr) throw insErr
+  }
+
+  const { error: updErr } = await supabase
+    .from('routes')
+    .update({ load_confirmed: true })
+    .eq('id', routeId)
+  if (updErr) throw updErr
 }
 
 /** Persiste el nuevo orden de las paradas (una actualización por parada). */

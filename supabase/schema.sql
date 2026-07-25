@@ -59,6 +59,17 @@ alter table addresses add column if not exists comuna text;
 alter table addresses add column if not exists observation text;
 
 -- ----------------------------------------------------------------------------
+--  Insumos: el "recurso físico" que representan varios productos. Ej: varios
+--  productos ("oferta 5 gal", "normal 5 gal") comparten el insumo "Agua 5 gal".
+--  La carga inicial de la ruta se define por insumo, no por producto.
+-- ----------------------------------------------------------------------------
+create table if not exists supplies (
+  id         uuid primary key default gen_random_uuid(),
+  name       text not null,
+  created_at timestamptz not null default now()
+);
+
+-- ----------------------------------------------------------------------------
 --  Productos
 -- ----------------------------------------------------------------------------
 create table if not exists products (
@@ -69,6 +80,8 @@ create table if not exists products (
   image_url   text,
   created_at  timestamptz not null default now()
 );
+-- Insumo al que pertenece el producto (para la carga de ruta). Opcional.
+alter table products add column if not exists supply_id uuid references supplies (id) on delete set null;
 
 -- ----------------------------------------------------------------------------
 --  Plantillas de mensajes de WhatsApp (contenido con variables: {cliente},
@@ -166,6 +179,41 @@ create table if not exists route_stops (
   unique (order_id)
 );
 create index if not exists route_stops_route_id_idx on route_stops (route_id);
+
+-- ----------------------------------------------------------------------------
+--  Carga inicial de la ruta: cuántas unidades de cada producto salieron en el
+--  camión. Sirve para saber cuánto se vendió y cuánto reponer.
+-- ----------------------------------------------------------------------------
+create table if not exists route_loads (
+  id         uuid primary key default gen_random_uuid(),
+  route_id   uuid not null references routes (id) on delete cascade,
+  supply_id  uuid not null references supplies (id) on delete cascade,
+  quantity   integer not null default 0 check (quantity >= 0),
+  created_at timestamptz not null default now(),
+  unique (route_id, supply_id)
+);
+create index if not exists route_loads_route_id_idx on route_loads (route_id);
+
+-- Migración: si route_loads era por producto (versión anterior), se convierte a
+-- por insumo. Las cargas viejas por producto se descartan (aún no había insumos).
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'route_loads'
+      and column_name = 'product_id'
+  ) then
+    delete from route_loads;
+    alter table route_loads drop constraint if exists route_loads_route_id_product_id_key;
+    alter table route_loads drop column if exists product_id;
+    alter table route_loads add column if not exists supply_id uuid references supplies (id) on delete cascade;
+    alter table route_loads add constraint route_loads_route_id_supply_id_key unique (route_id, supply_id);
+  end if;
+end$$;
+
+-- Bandera: la carga inicial ya fue registrada. Hasta entonces, al repartidor se
+-- le ocultan los pedidos (debe registrar qué cargó primero).
+alter table routes add column if not exists load_confirmed boolean not null default false;
 
 -- ============================================================================
 --  MULTI-EMPRESA (multi-tenant): empresas, usuarios y aislamiento de datos
@@ -366,13 +414,17 @@ grant execute on function public.delivery_summary(uuid, date, date) to authentic
 alter table clients     add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
 alter table addresses   add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
 alter table products    add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
+alter table supplies    add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
 alter table orders      add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
 alter table order_items add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
 alter table routes      add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
 alter table route_stops add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
+alter table route_loads add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
 alter table whatsapp_templates add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
 alter table cost_categories add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
 alter table costs add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
+-- Quién registró el costo (para atribuirlo y filtrarlo por usuario).
+alter table costs add column if not exists created_by uuid references profiles (id) on delete set null default auth.uid();
 
 -- ----------------------------------------------------------------------------
 --  Migración de datos existentes: crea una empresa inicial y asigna a ella
@@ -389,11 +441,29 @@ begin
   update clients     set company_id = cid where company_id is null;
   update addresses   set company_id = cid where company_id is null;
   update products    set company_id = cid where company_id is null;
+  update supplies    set company_id = cid where company_id is null;
   update orders      set company_id = cid where company_id is null;
   update order_items set company_id = cid where company_id is null;
   update routes      set company_id = cid where company_id is null;
   update route_stops set company_id = cid where company_id is null;
+  update route_loads set company_id = cid where company_id is null;
 end$$;
+
+-- Rutas que ya existían (o que ya tienen entregas) se consideran iniciadas: no
+-- se les bloquean los pedidos por falta de carga inicial. Las rutas nuevas
+-- quedan en false y pedirán registrar la carga antes de mostrar los pedidos.
+-- Idempotente: sólo toca filas aún en false que cumplen la condición histórica.
+update routes
+set load_confirmed = true
+where load_confirmed = false
+  and (
+    created_at < '2026-07-25'::date
+    or exists (
+      select 1 from route_stops rs
+      join orders o on o.id = rs.order_id
+      where rs.route_id = routes.id and o.status in ('delivered', 'paid')
+    )
+  );
 
 -- ----------------------------------------------------------------------------
 --  Backfill: enlaza rutas antiguas (que guardaban el repartidor sólo como texto
@@ -430,10 +500,12 @@ where r.driver_id is null
 alter table clients     enable row level security;
 alter table addresses   enable row level security;
 alter table products    enable row level security;
+alter table supplies    enable row level security;
 alter table orders      enable row level security;
 alter table order_items enable row level security;
 alter table routes      enable row level security;
 alter table route_stops enable row level security;
+alter table route_loads enable row level security;
 alter table whatsapp_templates enable row level security;
 alter table cost_categories enable row level security;
 alter table costs       enable row level security;
@@ -445,7 +517,7 @@ do $$
 declare
   t text;
 begin
-  foreach t in array array['clients', 'addresses', 'products', 'whatsapp_templates', 'cost_categories', 'costs', 'orders', 'order_items', 'routes', 'route_stops']
+  foreach t in array array['clients', 'addresses', 'products', 'supplies', 'whatsapp_templates', 'cost_categories', 'costs', 'orders', 'order_items', 'routes', 'route_stops', 'route_loads']
   loop
     execute format('drop policy if exists "allow_all_%1$s" on %1$s;', t);       -- limpia política antigua
     execute format('drop policy if exists "tenant_%1$s" on %1$s;', t);
@@ -461,15 +533,26 @@ create policy "tenant_addresses" on addresses for all
 create policy "tenant_products" on products for all
   using (company_id = current_company_id())
   with check (company_id = current_company_id());
+create policy "tenant_supplies" on supplies for all
+  using (company_id = current_company_id())
+  with check (company_id = current_company_id());
 create policy "tenant_whatsapp_templates" on whatsapp_templates for all
   using (company_id = current_company_id())
   with check (company_id = current_company_id());
 create policy "tenant_cost_categories" on cost_categories for all
   using (company_id = current_company_id())
   with check (company_id = current_company_id());
+-- Costos: admin/operador ven y gestionan todos los de la empresa; el repartidor
+-- sólo ve/gestiona los que él mismo registró.
 create policy "tenant_costs" on costs for all
-  using (company_id = current_company_id())
-  with check (company_id = current_company_id());
+  using (
+    company_id = current_company_id()
+    and (current_user_role() <> 'repartidor' or created_by = auth.uid())
+  )
+  with check (
+    company_id = current_company_id()
+    and (current_user_role() <> 'repartidor' or created_by = auth.uid())
+  );
 
 -- Rutas: admin/operador ven todas las de la empresa; el repartidor sólo las suyas.
 create policy "tenant_routes" on routes for all
@@ -491,6 +574,46 @@ create policy "tenant_route_stops" on route_stops for all
   with check (
     company_id = current_company_id()
     and (current_user_role() <> 'repartidor' or is_my_route(route_id))
+  );
+
+-- Carga de la ruta.
+--  - Lectura: el repartidor ve la carga de sus rutas asignadas.
+--  - Escritura: admin/operador siempre; el repartidor SÓLO mientras la carga
+--    aún no está confirmada (registro inicial). Una vez confirmada, sólo un
+--    administrador puede modificarla.
+drop policy if exists "route_loads_select" on route_loads;
+drop policy if exists "route_loads_write" on route_loads;
+create policy "route_loads_select" on route_loads for select
+  using (
+    company_id = current_company_id()
+    and (current_user_role() <> 'repartidor' or is_my_route(route_id))
+  );
+create policy "route_loads_write" on route_loads for all
+  using (
+    company_id = current_company_id()
+    and (
+      current_user_role() <> 'repartidor'
+      or (
+        is_my_route(route_id)
+        and not coalesce(
+          (select r.load_confirmed from routes r where r.id = route_loads.route_id),
+          false
+        )
+      )
+    )
+  )
+  with check (
+    company_id = current_company_id()
+    and (
+      current_user_role() <> 'repartidor'
+      or (
+        is_my_route(route_id)
+        and not coalesce(
+          (select r.load_confirmed from routes r where r.id = route_loads.route_id),
+          false
+        )
+      )
+    )
   );
 
 -- Pedidos: el repartidor sólo ve los pedidos que están en sus rutas.
@@ -535,6 +658,9 @@ create policy "profiles_read" on profiles for select
     id = auth.uid()
     or is_superadmin()
     or (is_company_admin() and company_id = current_company_id())
+    -- El operador puede leer los perfiles de su empresa (para ver quién registró
+    -- cada costo, asignar repartidores, etc.).
+    or (current_user_role() = 'operador' and company_id = current_company_id())
   );
 
 drop policy if exists "profiles_write" on profiles;

@@ -21,12 +21,19 @@ export interface Address {
   created_at: string
 }
 
+export interface Supply {
+  id: string
+  name: string
+  created_at: string
+}
+
 export interface Product {
   id: string
   name: string
   description: string | null
   price: number
   image_url: string | null
+  supply_id: string | null
   created_at: string
 }
 
@@ -50,11 +57,13 @@ export interface Cost {
   issue_date: string
   category_id: string | null
   amount: number
+  created_by: string | null
   created_at: string
 }
 
 export interface CostWithCategory extends Cost {
   category: CostCategory | null
+  creatorName: string | null
 }
 
 export interface Order {
@@ -104,7 +113,15 @@ export interface Route {
   driver: string | null
   driver_id: string | null
   notes: string | null
+  load_confirmed: boolean
   created_at: string
+}
+
+export interface RouteLoad {
+  id: string
+  route_id: string
+  supply_id: string
+  quantity: number
 }
 
 export interface RouteStop {
@@ -121,5 +138,6 @@ export interface RouteStopWithOrder extends RouteStop {
 
 export interface RouteDetail extends Route {
   stops: RouteStopWithOrder[]
+  loads: RouteLoad[]
   driverName?: string | null
 }

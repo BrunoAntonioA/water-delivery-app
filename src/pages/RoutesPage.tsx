@@ -203,6 +203,14 @@ export default function RoutesPage() {
                         ))}
                       </select>
                     )}
+                    <Link
+                      to={`/rutas/${r.id}/carga`}
+                      className="flex-1 sm:flex-none"
+                    >
+                      <Button variant="secondary" className="w-full">
+                        🛒 Ver carga
+                      </Button>
+                    </Link>
                     <Link to={`/rutas/${r.id}`} className="flex-1 sm:flex-none">
                       <Button variant="secondary" className="w-full">
                         Abrir
