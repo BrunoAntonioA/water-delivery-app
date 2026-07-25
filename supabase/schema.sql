@@ -315,6 +315,51 @@ end$$;
 grant execute on function public.add_quick_sale(uuid, text, jsonb) to authenticated;
 
 -- ----------------------------------------------------------------------------
+--  Resumen de entregas por repartidor: cantidad entregada de cada producto en
+--  un rango de fechas (por fecha de la ruta). Un pedido cuenta como entregado
+--  si su estado es 'delivered' o 'paid'.
+--  - admin/operador: pueden filtrar por cualquier repartidor (o todos).
+--  - repartidor: sólo ve lo suyo (se fuerza r.driver_id = auth.uid()).
+-- ----------------------------------------------------------------------------
+create or replace function public.delivery_summary(
+  p_driver_id uuid default null,
+  p_from date default null,
+  p_to date default null
+)
+returns table (
+  driver_id uuid,
+  driver_name text,
+  product_id uuid,
+  product_name text,
+  total_quantity bigint
+)
+language sql stable security definer set search_path = public as $$
+  select
+    r.driver_id,
+    coalesce(pf.full_name, pf.email, 'Sin nombre') as driver_name,
+    pr.id   as product_id,
+    pr.name as product_name,
+    sum(oi.quantity)::bigint as total_quantity
+  from routes r
+  join route_stops rs on rs.route_id = r.id
+  join orders o       on o.id = rs.order_id
+  join order_items oi on oi.order_id = o.id
+  join products pr    on pr.id = oi.product_id
+  left join profiles pf on pf.id = r.driver_id
+  where r.company_id = current_company_id()
+    and r.driver_id is not null
+    and o.status in ('delivered', 'paid')
+    and (current_user_role() <> 'repartidor' or r.driver_id = auth.uid())
+    and (p_driver_id is null or r.driver_id = p_driver_id)
+    and (p_from is null or r.route_date >= p_from)
+    and (p_to   is null or r.route_date <= p_to)
+  group by r.driver_id, pf.full_name, pf.email, pr.id, pr.name
+  order by driver_name, pr.name;
+$$;
+
+grant execute on function public.delivery_summary(uuid, date, date) to authenticated;
+
+-- ----------------------------------------------------------------------------
 --  Agregar company_id a todas las tablas de datos. El default lo llena solo
 --  con la empresa del usuario que inserta, así el frontend no tiene que enviarlo.
 -- ----------------------------------------------------------------------------
@@ -349,6 +394,31 @@ begin
   update routes      set company_id = cid where company_id is null;
   update route_stops set company_id = cid where company_id is null;
 end$$;
+
+-- ----------------------------------------------------------------------------
+--  Backfill: enlaza rutas antiguas (que guardaban el repartidor sólo como texto
+--  en "driver") con la cuenta del repartidor, para que el "Resumen de entregas"
+--  incluya TODO el histórico y no se pierda el rastro de esos pedidos.
+--  Sólo actúa cuando driver_id está vacío y existe UN único repartidor de la
+--  misma empresa cuyo nombre coincide (ignorando mayúsculas/espacios).
+--  Idempotente: al re-ejecutar el esquema no pisa asignaciones existentes.
+-- ----------------------------------------------------------------------------
+update routes r
+set driver_id = (
+  select p.id from profiles p
+  where p.role = 'repartidor'
+    and p.company_id = r.company_id
+    and lower(btrim(p.full_name)) = lower(btrim(r.driver))
+  limit 1
+)
+where r.driver_id is null
+  and coalesce(btrim(r.driver), '') <> ''
+  and (
+    select count(*) from profiles p
+    where p.role = 'repartidor'
+      and p.company_id = r.company_id
+      and lower(btrim(p.full_name)) = lower(btrim(r.driver))
+  ) = 1;
 
 -- ============================================================================
 --  Row Level Security (RLS) — AISLAMIENTO POR EMPRESA

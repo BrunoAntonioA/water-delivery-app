@@ -7,6 +7,7 @@ import ClientsPage from './pages/ClientsPage'
 import ProductsPage from './pages/ProductsPage'
 import OrdersPage from './pages/OrdersPage'
 import OrdersReportPage from './pages/OrdersReportPage'
+import DeliveriesSummaryPage from './pages/DeliveriesSummaryPage'
 import RoutesPage from './pages/RoutesPage'
 import RouteDetailPage from './pages/RouteDetailPage'
 import CostsPage from './pages/CostsPage'
@@ -18,6 +19,7 @@ import LoginPage from './pages/LoginPage'
 
 const NAV: { module: ModuleKey; to: string; label: string; icon: string }[] = [
   { module: 'rutas', to: '/rutas', label: 'Rutas', icon: '🚚' },
+  { module: 'entregas', to: '/entregas', label: 'Entregas', icon: '📋' },
   { module: 'pedidos', to: '/pedidos', label: 'Pedidos', icon: '📦' },
   { module: 'clientes', to: '/clientes', label: 'Clientes', icon: '👥' },
   { module: 'productos', to: '/productos', label: 'Productos', icon: '💧' },
@@ -195,6 +197,14 @@ export default function App() {
             element={
               <Protected module="reportes" home={home}>
                 <OrdersReportPage />
+              </Protected>
+            }
+          />
+          <Route
+            path="/entregas"
+            element={
+              <Protected module="entregas" home={home}>
+                <DeliveriesSummaryPage />
               </Protected>
             }
           />

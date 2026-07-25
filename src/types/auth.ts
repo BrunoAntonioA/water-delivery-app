@@ -19,6 +19,7 @@ export interface Company {
 export type ModuleKey =
   | 'pedidos'
   | 'reportes'
+  | 'entregas'
   | 'rutas'
   | 'clientes'
   | 'productos'
@@ -33,6 +34,7 @@ export const ROLE_MODULES: Record<Role, ModuleKey[]> = {
   admin: [
     'pedidos',
     'reportes',
+    'entregas',
     'rutas',
     'clientes',
     'productos',
@@ -41,7 +43,7 @@ export const ROLE_MODULES: Record<Role, ModuleKey[]> = {
     'usuarios',
   ],
   operador: ['pedidos', 'reportes', 'clientes', 'productos'],
-  repartidor: ['rutas'],
+  repartidor: ['rutas', 'entregas'],
 }
 
 export const ROLE_LABELS: Record<Role, string> = {
