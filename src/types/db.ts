@@ -27,13 +27,19 @@ export interface Supply {
   created_at: string
 }
 
+/** Un insumo que compone un producto, con su cantidad. */
+export interface ProductSupplyLink {
+  supply_id: string
+  quantity: number
+}
+
 export interface Product {
   id: string
   name: string
   description: string | null
   price: number
   image_url: string | null
-  supply_id: string | null
+  supplies: ProductSupplyLink[]
   created_at: string
 }
 

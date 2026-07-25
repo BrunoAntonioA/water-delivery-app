@@ -33,9 +33,9 @@ export default function RouteLoadPage() {
   })
 
   const productSupply = useMemo(() => {
-    const m = new Map<string, string>()
+    const m = new Map<string, { supply_id: string; quantity: number }[]>()
     products?.forEach((p) => {
-      if (p.supply_id) m.set(p.id, p.supply_id)
+      if (p.supplies?.length) m.set(p.id, p.supplies)
     })
     return m
   }, [products])

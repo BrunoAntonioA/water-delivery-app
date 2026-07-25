@@ -1,7 +1,7 @@
 import { useMutation } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import { saveRouteLoads } from '../api/routes'
-import type { RouteDetail, Supply } from '../types/db'
+import type { ProductSupplyLink, RouteDetail, Supply } from '../types/db'
 import { Button, Card, EmptyState } from './ui'
 
 /**
@@ -200,20 +200,27 @@ export function RouteLoadSection({
 
 /**
  * Calcula cuánto se entregó de cada insumo en una ruta, a partir de sus paradas
- * y del mapa producto→insumo. Sólo cuenta pedidos entregados o pagados.
+ * y del mapa producto→insumos (cada uno con su cantidad). Sólo cuenta pedidos
+ * entregados o pagados. Entregar N de un producto descuenta N × cantidad de cada
+ * insumo que lo compone.
  */
 export function soldBySupplyOf(
   route: RouteDetail,
-  productSupply: Map<string, string>
+  productSupply: Map<string, ProductSupplyLink[]>
 ): Map<string, number> {
   const m = new Map<string, number>()
   for (const s of route.stops ?? []) {
     const o = s.order
     if (!o || (o.status !== 'delivered' && o.status !== 'paid')) continue
     for (const it of o.items) {
-      const supplyId = productSupply.get(it.product_id)
-      if (!supplyId) continue
-      m.set(supplyId, (m.get(supplyId) ?? 0) + it.quantity)
+      const links = productSupply.get(it.product_id)
+      if (!links) continue
+      for (const link of links) {
+        m.set(
+          link.supply_id,
+          (m.get(link.supply_id) ?? 0) + it.quantity * link.quantity
+        )
+      }
     }
   }
   return m

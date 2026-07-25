@@ -80,8 +80,21 @@ create table if not exists products (
   image_url   text,
   created_at  timestamptz not null default now()
 );
--- Insumo al que pertenece el producto (para la carga de ruta). Opcional.
-alter table products add column if not exists supply_id uuid references supplies (id) on delete set null;
+
+-- ----------------------------------------------------------------------------
+--  Insumos que componen un producto (relación N:N con cantidad). Ej: "Pack 4
+--  bidones 20L" = insumo "Bidón 20L" x4; "Dispensador + bidón" = 2 insumos x1.
+--  Al entregar un producto se descuenta quantity por cada insumo de la carga.
+-- ----------------------------------------------------------------------------
+create table if not exists product_supplies (
+  id         uuid primary key default gen_random_uuid(),
+  product_id uuid not null references products (id) on delete cascade,
+  supply_id  uuid not null references supplies (id) on delete cascade,
+  quantity   integer not null default 1 check (quantity > 0),
+  created_at timestamptz not null default now(),
+  unique (product_id, supply_id)
+);
+create index if not exists product_supplies_product_id_idx on product_supplies (product_id);
 
 -- ----------------------------------------------------------------------------
 --  Plantillas de mensajes de WhatsApp (contenido con variables: {cliente},
@@ -415,6 +428,7 @@ alter table clients     add column if not exists company_id uuid references comp
 alter table addresses   add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
 alter table products    add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
 alter table supplies    add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
+alter table product_supplies add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
 alter table orders      add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
 alter table order_items add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
 alter table routes      add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
@@ -442,11 +456,31 @@ begin
   update addresses   set company_id = cid where company_id is null;
   update products    set company_id = cid where company_id is null;
   update supplies    set company_id = cid where company_id is null;
+  update product_supplies set company_id = cid where company_id is null;
   update orders      set company_id = cid where company_id is null;
   update order_items set company_id = cid where company_id is null;
   update routes      set company_id = cid where company_id is null;
   update route_stops set company_id = cid where company_id is null;
   update route_loads set company_id = cid where company_id is null;
+end$$;
+
+-- Migración: si products tenía un único insumo (products.supply_id, versión
+-- anterior), se traslada a product_supplies con cantidad 1 y se elimina la
+-- columna. Guardado tras un IF para que sea idempotente en re-ejecuciones.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'products'
+      and column_name = 'supply_id'
+  ) then
+    insert into product_supplies (company_id, product_id, supply_id, quantity)
+    select p.company_id, p.id, p.supply_id, 1
+    from products p
+    where p.supply_id is not null
+    on conflict (product_id, supply_id) do nothing;
+    alter table products drop column supply_id;
+  end if;
 end$$;
 
 -- Rutas que ya existían (o que ya tienen entregas) se consideran iniciadas: no
@@ -501,6 +535,7 @@ alter table clients     enable row level security;
 alter table addresses   enable row level security;
 alter table products    enable row level security;
 alter table supplies    enable row level security;
+alter table product_supplies enable row level security;
 alter table orders      enable row level security;
 alter table order_items enable row level security;
 alter table routes      enable row level security;
@@ -517,7 +552,7 @@ do $$
 declare
   t text;
 begin
-  foreach t in array array['clients', 'addresses', 'products', 'supplies', 'whatsapp_templates', 'cost_categories', 'costs', 'orders', 'order_items', 'routes', 'route_stops', 'route_loads']
+  foreach t in array array['clients', 'addresses', 'products', 'supplies', 'product_supplies', 'whatsapp_templates', 'cost_categories', 'costs', 'orders', 'order_items', 'routes', 'route_stops', 'route_loads']
   loop
     execute format('drop policy if exists "allow_all_%1$s" on %1$s;', t);       -- limpia política antigua
     execute format('drop policy if exists "tenant_%1$s" on %1$s;', t);
@@ -534,6 +569,9 @@ create policy "tenant_products" on products for all
   using (company_id = current_company_id())
   with check (company_id = current_company_id());
 create policy "tenant_supplies" on supplies for all
+  using (company_id = current_company_id())
+  with check (company_id = current_company_id());
+create policy "tenant_product_supplies" on product_supplies for all
   using (company_id = current_company_id())
   with check (company_id = current_company_id());
 create policy "tenant_whatsapp_templates" on whatsapp_templates for all

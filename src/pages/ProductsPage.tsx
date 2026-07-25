@@ -26,12 +26,17 @@ import {
 
 const PAGE_SIZE = 9
 
+interface SupplyRow {
+  supply_id: string
+  quantity: string
+}
+
 interface FormState {
   name: string
   description: string
   price: string
   image_url: string | null
-  supply_id: string // '' = sin insumo, '__new__' = crear uno nuevo
+  supplies: SupplyRow[]
   newSupply: string
 }
 
@@ -40,7 +45,7 @@ const emptyForm: FormState = {
   description: '',
   price: '',
   image_url: null,
-  supply_id: '',
+  supplies: [],
   newSupply: '',
 }
 
@@ -72,27 +77,38 @@ export default function ProductsPage() {
   const invalidate = () => qc.invalidateQueries({ queryKey: ['products'] })
 
   const saveMutation = useMutation({
-    mutationFn: async () => {
-      // Resolver el insumo: existente, ninguno, o crear uno nuevo al vuelo.
-      let supplyId: string | null = form.supply_id || null
-      if (form.supply_id === '__new__') {
-        supplyId = form.newSupply.trim()
-          ? await createSupply(form.newSupply.trim())
-          : null
-      }
+    mutationFn: () => {
       const input: ProductInput = {
         name: form.name.trim(),
         description: form.description.trim(),
         price: Number(form.price) || 0,
         image_url: form.image_url,
-        supply_id: supplyId,
+        supplies: form.supplies
+          .filter((s) => s.supply_id)
+          .map((s) => ({
+            supply_id: s.supply_id,
+            quantity: Math.max(1, Math.trunc(Number(s.quantity) || 1)),
+          })),
       }
       return editing ? updateProduct(editing.id, input) : createProduct(input)
     },
     onSuccess: () => {
       invalidate()
-      qc.invalidateQueries({ queryKey: ['supplies'] })
       setModalOpen(false)
+    },
+  })
+
+  // Crear un insumo nuevo al vuelo desde el formulario del producto.
+  const addSupplyMutation = useMutation({
+    mutationFn: (name: string) => createSupply(name.trim()),
+    onSuccess: (newId) => {
+      qc.invalidateQueries({ queryKey: ['supplies'] })
+      // Lo dejamos seleccionado en una fila nueva.
+      setForm((f) => ({
+        ...f,
+        supplies: [...f.supplies, { supply_id: newId, quantity: '1' }],
+        newSupply: '',
+      }))
     },
   })
 
@@ -114,7 +130,10 @@ export default function ProductsPage() {
       description: p.description ?? '',
       price: String(p.price),
       image_url: p.image_url,
-      supply_id: p.supply_id ?? '',
+      supplies: (p.supplies ?? []).map((s) => ({
+        supply_id: s.supply_id,
+        quantity: String(s.quantity),
+      })),
       newSupply: '',
     })
     setModalOpen(true)
@@ -134,10 +153,26 @@ export default function ProductsPage() {
     }
   }
 
-  const canSave =
-    form.name.trim() &&
-    Number(form.price) >= 0 &&
-    (form.supply_id !== '__new__' || form.newSupply.trim().length > 0)
+  const canSave = form.name.trim() && Number(form.price) >= 0
+
+  function addSupplyRow() {
+    setForm((f) => ({
+      ...f,
+      supplies: [...f.supplies, { supply_id: '', quantity: '1' }],
+    }))
+  }
+  function updateSupplyRow(i: number, patch: Partial<SupplyRow>) {
+    setForm((f) => ({
+      ...f,
+      supplies: f.supplies.map((s, idx) => (idx === i ? { ...s, ...patch } : s)),
+    }))
+  }
+  function removeSupplyRow(i: number) {
+    setForm((f) => ({
+      ...f,
+      supplies: f.supplies.filter((_, idx) => idx !== i),
+    }))
+  }
 
   return (
     <div>
@@ -257,33 +292,78 @@ export default function ProductsPage() {
           </div>
 
           <div>
-            <Label>Insumo (para la carga de ruta)</Label>
-            <select
-              value={form.supply_id}
-              onChange={(e) => setForm({ ...form, supply_id: e.target.value })}
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
-            >
-              <option value="">Sin insumo</option>
-              {supplies?.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
+            <Label>Insumos (para la carga de ruta)</Label>
+            <div className="space-y-2">
+              {form.supplies.map((row, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <select
+                    value={row.supply_id}
+                    onChange={(e) =>
+                      updateSupplyRow(i, { supply_id: e.target.value })
+                    }
+                    className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                  >
+                    <option value="">Elegir insumo…</option>
+                    {supplies?.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={row.quantity}
+                    onChange={(e) =>
+                      updateSupplyRow(i, { quantity: e.target.value })
+                    }
+                    className="w-16 shrink-0 rounded-lg border border-slate-300 px-2 py-2 text-right text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                    aria-label="Cantidad"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeSupplyRow(i)}
+                    className="shrink-0 rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100 hover:text-red-600"
+                    aria-label="Quitar insumo"
+                  >
+                    ✕
+                  </button>
+                </div>
               ))}
-              <option value="__new__">➕ Crear nuevo insumo…</option>
-            </select>
-            {form.supply_id === '__new__' && (
+            </div>
+
+            <button
+              type="button"
+              onClick={addSupplyRow}
+              className="mt-2 text-sm font-medium text-sky-600 hover:underline"
+            >
+              + Agregar insumo
+            </button>
+
+            <div className="mt-3 flex gap-2 border-t border-slate-100 pt-3">
               <TextInput
-                className="mt-2"
                 value={form.newSupply}
                 onChange={(e) =>
                   setForm({ ...form, newSupply: e.target.value })
                 }
-                placeholder="Nombre del insumo (ej: Agua 5 galones)"
+                placeholder="¿Falta un insumo? Créalo (ej: Bidón 20L)"
               />
-            )}
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={
+                  !form.newSupply.trim() || addSupplyMutation.isPending
+                }
+                onClick={() => addSupplyMutation.mutate(form.newSupply)}
+              >
+                Crear
+              </Button>
+            </div>
             <p className="mt-1 text-xs text-slate-400">
-              Varios productos pueden compartir el mismo insumo; la carga de la
-              ruta se lleva por insumo.
+              Un producto puede tener varios insumos (ej: dispensador + bidón) o
+              el mismo varias veces (ej: pack de 4). La carga de ruta se descuenta
+              por insumo × cantidad.
             </p>
           </div>
 
