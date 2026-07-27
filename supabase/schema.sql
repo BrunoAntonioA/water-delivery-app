@@ -441,6 +441,40 @@ alter table costs add column if not exists company_id uuid references companies 
 alter table costs add column if not exists created_by uuid references profiles (id) on delete set null default auth.uid();
 
 -- ----------------------------------------------------------------------------
+--  Auditoría: quién creó/modificó y cuándo (orders, costs, profiles). Lo llena
+--  automáticamente un trigger, así el frontend no puede falsear el autor.
+-- ----------------------------------------------------------------------------
+alter table orders   add column if not exists created_by uuid references profiles (id) on delete set null default auth.uid();
+alter table orders   add column if not exists updated_at timestamptz;
+alter table orders   add column if not exists updated_by uuid references profiles (id) on delete set null;
+alter table costs    add column if not exists updated_at timestamptz;
+alter table costs    add column if not exists updated_by uuid references profiles (id) on delete set null;
+alter table profiles add column if not exists created_by uuid references profiles (id) on delete set null;
+alter table profiles add column if not exists updated_at timestamptz;
+alter table profiles add column if not exists updated_by uuid references profiles (id) on delete set null;
+
+create or replace function public.set_audit_fields()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if TG_OP = 'INSERT' then
+    new.created_by := coalesce(new.created_by, auth.uid());
+  end if;
+  new.updated_at := now();
+  new.updated_by := auth.uid();
+  return new;
+end$$;
+
+drop trigger if exists audit_orders on orders;
+create trigger audit_orders before insert or update on orders
+  for each row execute function public.set_audit_fields();
+drop trigger if exists audit_costs on costs;
+create trigger audit_costs before insert or update on costs
+  for each row execute function public.set_audit_fields();
+drop trigger if exists audit_profiles on profiles;
+create trigger audit_profiles before insert or update on profiles
+  for each row execute function public.set_audit_fields();
+
+-- ----------------------------------------------------------------------------
 --  Migración de datos existentes: crea una empresa inicial y asigna a ella
 --  todos los registros que aún no tengan empresa.
 -- ----------------------------------------------------------------------------
@@ -529,7 +563,18 @@ where r.driver_id is null
 -- ----------------------------------------------------------------------------
 --  Cada usuario sólo puede ver/editar datos de SU empresa. Esto se aplica en
 --  la base de datos, así que ningún error del frontend puede filtrar datos
---  entre empresas.
+--  entre empresas. El frontend NO necesita filtrar por company_id: la BD lo
+--  garantiza para TODA consulta, actual o futura.
+--
+--  ▶ CHECKLIST AL AGREGAR UNA TABLA NUEVA (obligatorio para no filtrar datos):
+--     1. Agrega la columna `company_id ... default current_company_id()`
+--        (en la sección de ALTERs de company_id, y en el backfill de datos).
+--     2. `alter table <tabla> enable row level security;` (lista de abajo).
+--     3. Agrégala al arreglo del loop que limpia políticas viejas.
+--     4. Crea una política `tenant_<tabla>` con
+--        `using/with check (company_id = current_company_id())`
+--        (más restricciones por rol si aplica, como en routes/route_stops).
+--  Verifica luego con la consulta de diagnóstico de supabase/verify-rls.sql.
 -- ============================================================================
 alter table clients     enable row level security;
 alter table addresses   enable row level security;
@@ -708,8 +753,15 @@ create policy "profiles_write" on profiles for all
     or (is_company_admin() and company_id = current_company_id())
   )
   with check (
+    -- Un admin de empresa sólo gestiona perfiles de SU empresa y NUNCA puede
+    -- crear/ascender a 'superadmin' (eso rompería el aislamiento entre empresas).
+    -- Sólo un superadmin puede otorgar el rol superadmin.
     is_superadmin()
-    or (is_company_admin() and company_id = current_company_id())
+    or (
+      is_company_admin()
+      and company_id = current_company_id()
+      and role <> 'superadmin'
+    )
   );
 
 -- ============================================================================
@@ -722,16 +774,32 @@ insert into storage.buckets (id, name, public)
 values ('product-images', 'product-images', true)
 on conflict (id) do nothing;
 
+-- Límite de tamaño (5 MB) y tipos permitidos (sólo imágenes).
+update storage.buckets
+set file_size_limit = 5242880,
+    allowed_mime_types = array['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+where id = 'product-images';
+
 drop policy if exists "product_images_all" on storage.objects;
 drop policy if exists "product_images_read" on storage.objects;
+-- Lectura pública: las imágenes de producto se muestran sin login.
 create policy "product_images_read" on storage.objects for select
   using (bucket_id = 'product-images');
 
+-- Escritura/borrado: sólo usuarios autenticados y SÓLO dentro de la "carpeta"
+-- de SU empresa (los objetos se guardan como "<company_id>/<archivo>"). Así un
+-- usuario no puede subir, pisar ni borrar imágenes de otra empresa.
 drop policy if exists "product_images_write" on storage.objects;
 create policy "product_images_write" on storage.objects for all
   to authenticated
-  using (bucket_id = 'product-images')
-  with check (bucket_id = 'product-images');
+  using (
+    bucket_id = 'product-images'
+    and (storage.foldername(name))[1] = (current_company_id())::text
+  )
+  with check (
+    bucket_id = 'product-images'
+    and (storage.foldername(name))[1] = (current_company_id())::text
+  );
 
 -- ============================================================================
 --  BOOTSTRAP — crea tu primer usuario superadmin (una sola vez)

@@ -1,7 +1,21 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../lib/auth'
 import { isSupabaseConfigured } from '../lib/supabase'
+import {
+  getGuardState,
+  recordFailure,
+  recordSuccess,
+  LOCK_MINUTES,
+} from '../lib/loginGuard'
+import { Turnstile, turnstileConfigured } from '../components/Turnstile'
 import { Button, Card, Label, TextInput } from '../components/ui'
+
+function mmss(ms: number): string {
+  const total = Math.max(0, Math.ceil(ms / 1000))
+  const m = Math.floor(total / 60)
+  const s = total % 60
+  return `${m}:${String(s).padStart(2, '0')}`
+}
 
 export default function LoginPage() {
   const { signIn } = useAuth()
@@ -10,19 +24,70 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null)
+  const [humanChecked, setHumanChecked] = useState(false)
+
+  // "now" avanza cada segundo para actualizar el estado del bloqueo y el conteo.
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [])
+
+  const guard = useMemo(() => getGuardState(email, now), [email, now])
+  const captchaSolved = turnstileConfigured ? Boolean(captchaToken) : humanChecked
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault()
+    const g = getGuardState(email)
+    if (g.status === 'locked') {
+      setError(
+        `Demasiados intentos. Espera ${mmss(g.remainingMs)} antes de reintentar.`
+      )
+      return
+    }
+    if (g.status === 'captcha' && !captchaSolved) {
+      setError('Confirma que no eres un robot para continuar.')
+      return
+    }
+
     setError('')
     setLoading(true)
     try {
-      await signIn(email.trim(), password)
+      await signIn(email.trim(), password, captchaToken ?? undefined)
+      recordSuccess(email)
     } catch (err) {
-      setError('Correo o contraseña incorrectos.')
+      const next = recordFailure(email)
+      // Reiniciar el captcha para el siguiente intento.
+      setCaptchaToken(null)
+      setHumanChecked(false)
+      window.turnstile?.reset()
+      setNow(Date.now())
+      if (next.status === 'locked') {
+        setError(
+          `Demasiados intentos fallidos. Espera ${LOCK_MINUTES} minutos antes de reintentar.`
+        )
+      } else if (next.status === 'captcha') {
+        setError(
+          `Contraseña incorrecta. Completa el captcha; te quedan ${next.triesLeft} ` +
+            `intento${next.triesLeft === 1 ? '' : 's'} antes del bloqueo.`
+        )
+      } else {
+        setError(
+          `Correo o contraseña incorrectos. Te quedan ${next.triesLeft} ` +
+            `intento${next.triesLeft === 1 ? '' : 's'} antes de pedir un captcha.`
+        )
+      }
       console.error(err)
     } finally {
       setLoading(false)
     }
   }
+
+  const locked = guard.status === 'locked'
+  const needsCaptcha = guard.status === 'captcha'
+  const canSubmit =
+    !loading && !locked && (!needsCaptcha || captchaSolved)
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
@@ -49,6 +114,7 @@ export default function LoginPage() {
               placeholder="tu@correo.com"
               required
               autoFocus
+              disabled={locked}
             />
           </div>
           <div>
@@ -58,13 +124,40 @@ export default function LoginPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
+              disabled={locked}
             />
           </div>
 
-          {error && <p className="text-sm text-red-600">{error}</p>}
+          {/* Captcha tras 3 fallos (y hasta el bloqueo). */}
+          {needsCaptcha &&
+            (turnstileConfigured ? (
+              <Turnstile onToken={setCaptchaToken} />
+            ) : (
+              <label className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={humanChecked}
+                  onChange={(e) => setHumanChecked(e.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                />
+                No soy un robot
+              </label>
+            ))}
 
-          <Button type="submit" className="w-full" disabled={loading}>
-            {loading ? 'Entrando…' : 'Entrar'}
+          {locked && (
+            <p className="rounded-lg bg-red-50 px-3 py-2 text-center text-sm text-red-700">
+              🔒 Cuenta bloqueada temporalmente. Reintenta en{' '}
+              <span className="font-semibold tabular-nums">
+                {mmss(guard.remainingMs)}
+              </span>
+              .
+            </p>
+          )}
+
+          {error && !locked && <p className="text-sm text-red-600">{error}</p>}
+
+          <Button type="submit" className="w-full" disabled={!canSubmit}>
+            {loading ? 'Entrando…' : locked ? 'Bloqueado' : 'Entrar'}
           </Button>
         </form>
       </Card>

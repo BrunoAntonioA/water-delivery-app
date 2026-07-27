@@ -91,11 +91,18 @@ export async function deleteProduct(id: string): Promise<void> {
   if (error) throw error
 }
 
-/** Sube una imagen al bucket y devuelve su URL pública. */
-export async function uploadProductImage(file: File): Promise<string> {
+/**
+ * Sube una imagen al bucket y devuelve su URL pública. Se guarda bajo la
+ * "carpeta" de la empresa ("<companyId>/<uuid>.<ext>") para que la política de
+ * Storage sólo permita a cada empresa escribir en la suya.
+ */
+export async function uploadProductImage(
+  file: File,
+  companyId: string
+): Promise<string> {
   const ext = file.name.split('.').pop() || 'jpg'
   // Nombre único sin depender de Math.random / Date en tiempo de render.
-  const path = `${crypto.randomUUID()}.${ext}`
+  const path = `${companyId}/${crypto.randomUUID()}.${ext}`
 
   const { error } = await supabase.storage
     .from(PRODUCT_IMAGES_BUCKET)

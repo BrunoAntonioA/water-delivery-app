@@ -88,7 +88,7 @@ export function CompanyUsers({ companyId }: { companyId: string }) {
     setModalOpen(true)
   }
 
-  const canSave = form.email.trim() && form.password.length >= 6 && form.role
+  const canSave = form.email.trim() && form.password.length >= 8 && form.role
 
   return (
     <div>
@@ -217,7 +217,7 @@ export function CompanyUsers({ companyId }: { companyId: string }) {
             />
           </div>
           <div>
-            <Label>Contraseña * (mín. 6 caracteres)</Label>
+            <Label>Contraseña * (mín. 8 caracteres)</Label>
             <TextInput
               type="text"
               value={form.password}

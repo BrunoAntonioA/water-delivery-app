@@ -16,7 +16,11 @@ interface AuthState {
   loading: boolean
   /** true mientras se está cargando el perfil de una sesión existente. */
   profileLoading: boolean
-  signIn: (email: string, password: string) => Promise<void>
+  signIn: (
+    email: string,
+    password: string,
+    captchaToken?: string
+  ) => Promise<void>
   signOut: () => Promise<void>
   reloadProfile: () => Promise<void>
 }
@@ -87,8 +91,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  async function signIn(email: string, password: string) {
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
+  async function signIn(email: string, password: string, captchaToken?: string) {
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+      // Si Supabase Auth tiene el captcha activado, se verifica en el servidor.
+      ...(captchaToken ? { options: { captchaToken } } : {}),
+    })
     if (error) throw error
   }
 

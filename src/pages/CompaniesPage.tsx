@@ -75,7 +75,7 @@ export default function CompaniesPage() {
   const canSave =
     form.name.trim() &&
     form.adminEmail.trim() &&
-    form.adminPassword.length >= 6
+    form.adminPassword.length >= 8
 
   return (
     <div>
@@ -175,7 +175,7 @@ export default function CompaniesPage() {
                 />
               </div>
               <div>
-                <Label>Contraseña * (mín. 6 caracteres)</Label>
+                <Label>Contraseña * (mín. 8 caracteres)</Label>
                 <TextInput
                   type="text"
                   value={form.adminPassword}

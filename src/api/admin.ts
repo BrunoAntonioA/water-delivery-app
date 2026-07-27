@@ -1,4 +1,4 @@
-import { createTempAuthClient, supabase } from '../lib/supabase'
+import { supabase } from '../lib/supabase'
 import type { Company, Profile, Role } from '../types/auth'
 
 // --- Empresas (superadmin) ---
@@ -94,7 +94,9 @@ export interface NewUserInput {
 export async function createUser(input: NewUserInput): Promise<void> {
   const email = input.email.trim().toLowerCase()
 
-  // ¿Existe ya un perfil (posiblemente desactivado) con este correo?
+  // ¿Existe ya un perfil (posiblemente desactivado) con este correo? Si está
+  // desactivado lo reactivamos (esto es una simple actualización de perfil,
+  // autorizada por RLS para el admin de la empresa).
   const { data: existing } = await supabase
     .from('profiles')
     .select('id, active')
@@ -105,8 +107,6 @@ export async function createUser(input: NewUserInput): Promise<void> {
     if (existing.active) {
       throw new Error('Ya existe un usuario activo con ese correo.')
     }
-    // Reactivar y actualizar rol/nombre. (La contraseña sigue siendo la anterior;
-    // el usuario puede restablecerla si la olvidó.)
     const { error } = await supabase
       .from('profiles')
       .update({
@@ -120,34 +120,32 @@ export async function createUser(input: NewUserInput): Promise<void> {
     return
   }
 
-  const temp = createTempAuthClient()
-  const { data, error } = await temp.auth.signUp({
-    email,
-    password: input.password,
+  // Alta nueva: la realiza la Edge Function "admin-create-user" con el service
+  // role. Así el registro público (signup) puede estar DESACTIVADO en Supabase
+  // y sólo un admin/superadmin autenticado puede crear cuentas.
+  const { error } = await supabase.functions.invoke('admin-create-user', {
+    body: {
+      email,
+      password: input.password,
+      full_name: input.full_name,
+      role: input.role,
+      company_id: input.company_id,
+    },
   })
   if (error) {
-    if (/already registered|already exists/i.test(error.message)) {
-      throw new Error(
-        'Ese correo ya tiene una cuenta en Supabase. Bórrala en Authentication → Users (o usa otro correo).'
-      )
+    // La Edge Function devuelve el detalle del error en el cuerpo de la respuesta.
+    let message = error.message
+    const context = (error as { context?: Response }).context
+    if (context && typeof context.json === 'function') {
+      try {
+        const body = await context.json()
+        if (body?.error) message = body.error
+      } catch {
+        /* sin cuerpo JSON: se usa el mensaje genérico */
+      }
     }
-    throw error
+    throw new Error(message)
   }
-  const userId = data.user?.id
-  if (!userId) {
-    throw new Error(
-      'No se pudo crear la cuenta. Revisa que los registros (signups) estén habilitados en Supabase.'
-    )
-  }
-
-  const { error: profileError } = await supabase.from('profiles').insert({
-    id: userId,
-    company_id: input.company_id,
-    role: input.role,
-    full_name: input.full_name || null,
-    email,
-  })
-  if (profileError) throw profileError
 }
 
 export async function updateUserRole(id: string, role: Role): Promise<void> {

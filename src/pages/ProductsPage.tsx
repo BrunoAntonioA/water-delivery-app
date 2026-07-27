@@ -10,6 +10,7 @@ import {
 } from '../api/products'
 import { createSupply, listSupplies } from '../api/supplies'
 import type { Product } from '../types/db'
+import { useAuth } from '../lib/auth'
 import { formatMoney } from '../lib/format'
 import { Modal } from '../components/Modal'
 import {
@@ -51,6 +52,7 @@ const emptyForm: FormState = {
 
 export default function ProductsPage() {
   const qc = useQueryClient()
+  const { company } = useAuth()
   const { data: products, isLoading } = useQuery({
     queryKey: ['products'],
     queryFn: listProducts,
@@ -142,9 +144,13 @@ export default function ProductsPage() {
   async function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
+    if (!company?.id) {
+      alert('No se pudo determinar tu empresa. Vuelve a iniciar sesión.')
+      return
+    }
     setUploading(true)
     try {
-      const url = await uploadProductImage(file)
+      const url = await uploadProductImage(file, company.id)
       setForm((f) => ({ ...f, image_url: url }))
     } catch (err) {
       alert('Error al subir la imagen: ' + (err as Error).message)
