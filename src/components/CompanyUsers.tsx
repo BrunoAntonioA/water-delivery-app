@@ -6,10 +6,16 @@ import {
   deleteUser,
   listUsersByCompany,
   reactivateUser,
+  updateUser,
   updateUserRole,
 } from '../api/admin'
 import { useAuth } from '../lib/auth'
-import { ASSIGNABLE_ROLES, ROLE_LABELS, type Role } from '../types/auth'
+import {
+  ASSIGNABLE_ROLES,
+  ROLE_LABELS,
+  type Profile,
+  type Role,
+} from '../types/auth'
 import { Modal } from './Modal'
 import { Button, Card, EmptyState, Label, Spinner, TextInput } from './ui'
 
@@ -45,6 +51,10 @@ export function CompanyUsers({ companyId }: { companyId: string }) {
   const [modalOpen, setModalOpen] = useState(false)
   const [form, setForm] = useState<FormState>(emptyForm)
 
+  // Edición (contraseña / nombre) de un usuario existente.
+  const [editUser, setEditUser] = useState<Profile | null>(null)
+  const [editForm, setEditForm] = useState({ full_name: '', password: '' })
+
   const invalidate = () => qc.invalidateQueries({ queryKey: key })
 
   const createMutation = useMutation({
@@ -68,6 +78,18 @@ export function CompanyUsers({ companyId }: { companyId: string }) {
     onSuccess: invalidate,
   })
 
+  const updateMutation = useMutation({
+    mutationFn: () =>
+      updateUser(editUser!.id, {
+        full_name: editForm.full_name.trim(),
+        password: editForm.password || undefined,
+      }),
+    onSuccess: () => {
+      invalidate()
+      setEditUser(null)
+    },
+  })
+
   const deactivateMutation = useMutation({
     mutationFn: (id: string) => deactivateUser(id),
     onSuccess: invalidate,
@@ -88,7 +110,18 @@ export function CompanyUsers({ companyId }: { companyId: string }) {
     setModalOpen(true)
   }
 
+  function openEdit(u: Profile) {
+    setEditUser(u)
+    setEditForm({ full_name: u.full_name ?? '', password: '' })
+  }
+
   const canSave = form.email.trim() && form.password.length >= 8 && form.role
+
+  const pwOk = editForm.password === '' || editForm.password.length >= 8
+  const nameChanged =
+    editUser != null && editForm.full_name.trim() !== (editUser.full_name ?? '')
+  const canSaveEdit =
+    pwOk && (editForm.password.length >= 8 || nameChanged)
 
   return (
     <div>
@@ -142,6 +175,9 @@ export function CompanyUsers({ companyId }: { companyId: string }) {
                         </option>
                       ))}
                     </select>
+                    <Button variant="secondary" onClick={() => openEdit(u)}>
+                      Editar
+                    </Button>
                     {!isSelf && u.active && (
                       <Button
                         variant="secondary"
@@ -257,6 +293,68 @@ export function CompanyUsers({ companyId }: { companyId: string }) {
             </Button>
             <Button type="submit" disabled={!canSave || createMutation.isPending}>
               {createMutation.isPending ? 'Creando…' : 'Crear usuario'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal
+        open={editUser != null}
+        onClose={() => setEditUser(null)}
+        title={`Editar ${editUser?.full_name || editUser?.email || 'usuario'}`}
+      >
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (canSaveEdit) updateMutation.mutate()
+          }}
+          className="space-y-4"
+        >
+          <div>
+            <Label>Nombre</Label>
+            <TextInput
+              value={editForm.full_name}
+              onChange={(e) =>
+                setEditForm({ ...editForm, full_name: e.target.value })
+              }
+            />
+          </div>
+          <div>
+            <Label>Nueva contraseña (mín. 8; deja vacío para no cambiarla)</Label>
+            <TextInput
+              type="text"
+              value={editForm.password}
+              onChange={(e) =>
+                setEditForm({ ...editForm, password: e.target.value })
+              }
+              placeholder="Nueva contraseña"
+            />
+            {editForm.password !== '' && editForm.password.length < 8 && (
+              <p className="mt-1 text-sm text-red-600">
+                La contraseña debe tener al menos 8 caracteres.
+              </p>
+            )}
+          </div>
+
+          {updateMutation.isError && (
+            <p className="text-sm text-red-600">
+              Error: {(updateMutation.error as Error).message}
+            </p>
+          )}
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setEditUser(null)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="submit"
+              disabled={!canSaveEdit || updateMutation.isPending}
+            >
+              {updateMutation.isPending ? 'Guardando…' : 'Guardar cambios'}
             </Button>
           </div>
         </form>

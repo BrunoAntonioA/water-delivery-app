@@ -18,11 +18,29 @@ export async function listOrders(): Promise<OrderDetail[]> {
   const { data, error } = await supabase
     .from('orders')
     .select(
-      '*, client:clients(*), address:addresses(*), items:order_items(*, product:products(*))'
+      '*, client:clients(*), address:addresses(*), items:order_items(*, product:products(*)), stops:route_stops(route:routes(driver_id, driver_profile:profiles!driver_id(full_name, email)))'
     )
     .order('created_at', { ascending: false })
   if (error) throw error
-  return (data ?? []) as OrderDetail[]
+  type Stop = {
+    route: {
+      driver_id: string | null
+      driver_profile: { full_name: string | null; email: string | null } | null
+    } | null
+  }
+  // PostgREST devuelve el embed como OBJETO (relación 1-a-1 por el unique de
+  // route_stops.order_id) o como arreglo según el caso: soportamos ambos.
+  type Row = OrderDetail & { stops?: Stop | Stop[] | null }
+  return ((data ?? []) as Row[]).map(({ stops, ...o }) => {
+    const stop = Array.isArray(stops) ? stops[0] : stops
+    const route = stop?.route
+    const dp = route?.driver_profile
+    return {
+      ...o,
+      driverId: route?.driver_id ?? null,
+      driverName: dp?.full_name || dp?.email || null,
+    }
+  })
 }
 
 export async function getOrder(id: string): Promise<OrderDetail> {
@@ -69,6 +87,46 @@ export async function createOrder(input: OrderInput): Promise<string> {
   if (itemsError) throw itemsError
 
   return order.id as string
+}
+
+/** Edita un pedido: cliente, dirección, notas y productos (reemplaza los ítems). */
+export async function updateOrder(
+  id: string,
+  input: OrderInput
+): Promise<void> {
+  const total = input.items.reduce(
+    (sum, it) => sum + it.quantity * it.unit_price,
+    0
+  )
+
+  const { error } = await supabase
+    .from('orders')
+    .update({
+      client_id: input.client_id,
+      address_id: input.address_id,
+      notes: input.notes || null,
+      total,
+    })
+    .eq('id', id)
+  if (error) throw error
+
+  // Reemplazo total de los ítems.
+  const { error: delErr } = await supabase
+    .from('order_items')
+    .delete()
+    .eq('order_id', id)
+  if (delErr) throw delErr
+
+  const items = input.items.map((it) => ({
+    order_id: id,
+    product_id: it.product_id,
+    quantity: it.quantity,
+    unit_price: it.unit_price,
+  }))
+  if (items.length > 0) {
+    const { error: insErr } = await supabase.from('order_items').insert(items)
+    if (insErr) throw insErr
+  }
 }
 
 export async function updateOrderStatus(

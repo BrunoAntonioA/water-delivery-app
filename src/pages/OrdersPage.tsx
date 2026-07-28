@@ -1,6 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
-import { createOrder, deleteOrder, listOrders, type OrderItemInput } from '../api/orders'
+import {
+  createOrder,
+  deleteOrder,
+  listOrders,
+  updateOrder,
+  type OrderItemInput,
+} from '../api/orders'
 import { createClient, listClients } from '../api/clients'
 import { listProducts } from '../api/products'
 import type { OrderDetail, OrderStatus } from '../types/db'
@@ -63,6 +69,7 @@ export default function OrdersPage() {
   })
 
   const [modalOpen, setModalOpen] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [clientId, setClientId] = useState('')
   const [addressId, setAddressId] = useState('')
   const [notes, setNotes] = useState('')
@@ -115,8 +122,8 @@ export default function OrdersPage() {
     [items, productMap]
   )
 
-  const createMutation = useMutation({
-    mutationFn: () => {
+  const saveMutation = useMutation({
+    mutationFn: async () => {
       const payload: OrderItemInput[] = items
         .filter((it) => it.product_id && it.quantity > 0)
         .map((it) => ({
@@ -124,16 +131,19 @@ export default function OrdersPage() {
           quantity: it.quantity,
           unit_price: productMap.get(it.product_id) ?? 0,
         }))
-      return createOrder({
+      const input = {
         client_id: clientId,
         address_id: addressId || null,
         notes,
         items: payload,
-      })
+      }
+      if (editingId) await updateOrder(editingId, input)
+      else await createOrder(input)
     },
     onSuccess: () => {
       invalidate()
       setModalOpen(false)
+      setEditingId(null)
     },
   })
 
@@ -175,6 +185,7 @@ export default function OrdersPage() {
   )
 
   function openNew() {
+    setEditingId(null)
     setClientId('')
     setAddressId('')
     setNotes('')
@@ -183,6 +194,29 @@ export default function OrdersPage() {
     setNewClient(emptyNewClient)
     setModalOpen(true)
   }
+
+  function openEdit(o: OrderDetail) {
+    setEditingId(o.id)
+    setClientId(o.client_id ?? '')
+    setAddressId(o.address_id ?? '')
+    setNotes(o.notes ?? '')
+    setItems(
+      o.items.length
+        ? o.items.map((it) => ({
+            product_id: it.product_id,
+            quantity: it.quantity,
+          }))
+        : [{ product_id: '', quantity: 1 }]
+    )
+    setNewClientMode(false)
+    setNewClient(emptyNewClient)
+    setModalOpen(true)
+  }
+
+  // Sólo se pueden editar pedidos aún en estado "Pedido" y con cliente
+  // registrado (las ventas rápidas se manejan desde la ruta).
+  const canEditOrder = (o: OrderDetail) =>
+    o.status === 'ordered' && Boolean(o.client_id)
 
   function updateItem(i: number, patch: Partial<DraftItem>) {
     setItems((list) =>
@@ -327,18 +361,30 @@ export default function OrdersPage() {
                     )}
                   </div>
 
-                  {/* Eliminar (arriba a la derecha, como en las rutas) */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (confirm('¿Eliminar este pedido?'))
-                        deleteMutation.mutate(o.id)
-                    }}
-                    aria-label="Eliminar pedido"
-                    className="shrink-0 rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100 hover:text-red-600"
-                  >
-                    ✕
-                  </button>
+                  {/* Editar / Eliminar (arriba a la derecha) */}
+                  <div className="flex shrink-0 flex-col items-center gap-1">
+                    {canEditOrder(o) && (
+                      <button
+                        type="button"
+                        onClick={() => openEdit(o)}
+                        aria-label="Editar pedido"
+                        className="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100 hover:text-sky-600"
+                      >
+                        ✏️
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (confirm('¿Eliminar este pedido?'))
+                          deleteMutation.mutate(o.id)
+                      }}
+                      aria-label="Eliminar pedido"
+                      className="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100 hover:text-red-600"
+                    >
+                      ✕
+                    </button>
+                  </div>
                 </div>
 
                 <div className="mt-2 border-t border-slate-100 pt-2">
@@ -404,6 +450,7 @@ export default function OrdersPage() {
                       key={o.id}
                       o={o}
                       onChanged={invalidate}
+                      onEdit={canEditOrder(o) ? () => openEdit(o) : undefined}
                       onDelete={() => {
                         if (confirm('¿Eliminar este pedido?'))
                           deleteMutation.mutate(o.id)
@@ -425,13 +472,13 @@ export default function OrdersPage() {
       <Modal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
-        title="Nuevo pedido"
+        title={editingId ? 'Editar pedido' : 'Nuevo pedido'}
         wide
       >
         <form
           onSubmit={(e) => {
             e.preventDefault()
-            createMutation.mutate()
+            saveMutation.mutate()
           }}
           className="space-y-4"
         >
@@ -645,9 +692,9 @@ export default function OrdersPage() {
             </span>
           </div>
 
-          {createMutation.isError && (
+          {saveMutation.isError && (
             <p className="text-sm text-red-600">
-              Error al crear: {(createMutation.error as Error).message}
+              Error al guardar: {(saveMutation.error as Error).message}
             </p>
           )}
 
@@ -659,11 +706,12 @@ export default function OrdersPage() {
             >
               Cancelar
             </Button>
-            <Button
-              type="submit"
-              disabled={!canSave || createMutation.isPending}
-            >
-              {createMutation.isPending ? 'Creando…' : 'Crear pedido'}
+            <Button type="submit" disabled={!canSave || saveMutation.isPending}>
+              {saveMutation.isPending
+                ? 'Guardando…'
+                : editingId
+                  ? 'Guardar cambios'
+                  : 'Crear pedido'}
             </Button>
           </div>
         </form>
@@ -677,10 +725,12 @@ export default function OrdersPage() {
 function OrderRow({
   o,
   onChanged,
+  onEdit,
   onDelete,
 }: {
   o: OrderDetail
   onChanged: () => void
+  onEdit?: () => void
   onDelete: () => void
 }) {
   const clientName = orderClientName(o)
@@ -734,15 +784,27 @@ function OrderRow({
           className="flex items-center gap-1"
         />
       </td>
-      <td className="px-2 py-2 text-center">
-        <button
-          type="button"
-          onClick={onDelete}
-          aria-label="Eliminar pedido"
-          className="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100 hover:text-red-600"
-        >
-          ✕
-        </button>
+      <td className="px-2 py-2">
+        <div className="flex items-center justify-center gap-1">
+          {onEdit && (
+            <button
+              type="button"
+              onClick={onEdit}
+              aria-label="Editar pedido"
+              className="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100 hover:text-sky-600"
+            >
+              ✏️
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onDelete}
+            aria-label="Eliminar pedido"
+            className="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100 hover:text-red-600"
+          >
+            ✕
+          </button>
+        </div>
       </td>
     </tr>
   )

@@ -108,6 +108,9 @@ export interface OrderDetail extends Order {
   client: Client | null
   address: Address | null
   items: OrderItemWithProduct[]
+  // Repartidor de la ruta a la que pertenece el pedido (si está en una).
+  driverId?: string | null
+  driverName?: string | null
 }
 
 // --- Rutas de reparto ---

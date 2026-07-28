@@ -2,11 +2,17 @@ import { useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import { getDeliverySummary, type DeliverySummaryRow } from '../api/deliveries'
 import { listDrivers } from '../api/routes'
+import { listOrders } from '../api/orders'
+import { listCosts } from '../api/costs'
+import { listProducts } from '../api/products'
+import { listSupplies } from '../api/supplies'
 import { useAuth } from '../lib/auth'
+import { formatMoney, toLocalDateStr } from '../lib/format'
 import {
   Button,
   Card,
   EmptyState,
+  InfoHint,
   Label,
   PageHeader,
   Spinner,
@@ -46,6 +52,82 @@ export default function DeliveriesSummaryPage() {
         to: toDate || null,
       }),
   })
+
+  // Datos extra para el resumen personal del repartidor (sólo se cargan si lo es).
+  const { data: myOrders } = useQuery({
+    queryKey: ['orders'],
+    queryFn: listOrders,
+    enabled: isRepartidor,
+  })
+  const { data: myCosts } = useQuery({
+    queryKey: ['costs'],
+    queryFn: listCosts,
+    enabled: isRepartidor,
+  })
+  const { data: products } = useQuery({
+    queryKey: ['products'],
+    queryFn: listProducts,
+    enabled: isRepartidor,
+  })
+  const { data: supplies } = useQuery({
+    queryKey: ['supplies'],
+    queryFn: listSupplies,
+    enabled: isRepartidor,
+  })
+
+  const inRange = (dateStr: string) =>
+    (!fromDate || dateStr >= fromDate) && (!toDate || dateStr <= toDate)
+
+  // Ventas en efectivo (pedidos pagados en efectivo dentro del rango).
+  const ventasEfectivo = useMemo(() => {
+    let sum = 0
+    for (const o of myOrders ?? []) {
+      if (o.status !== 'paid' || o.payment_method !== 'efectivo') continue
+      if (!inRange(toLocalDateStr(o.created_at))) continue
+      sum += Number(o.paid_amount ?? o.total)
+    }
+    return sum
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myOrders, fromDate, toDate])
+
+  // Total de mis costos en el rango.
+  const totalCostos = useMemo(() => {
+    let sum = 0
+    for (const c of myCosts ?? []) {
+      if (!inRange(c.issue_date)) continue
+      sum += Number(c.amount)
+    }
+    return sum
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myCosts, fromDate, toDate])
+
+  // Insumos entregados: se derivan de los productos entregados (según el resumen)
+  // multiplicando por los insumos que compone cada producto.
+  const suppliesSummary = useMemo(() => {
+    const productSupply = new Map<string, { supply_id: string; quantity: number }[]>()
+    products?.forEach((p) => {
+      if (p.supplies?.length) productSupply.set(p.id, p.supplies)
+    })
+    const supplyName = new Map<string, string>()
+    supplies?.forEach((s) => supplyName.set(s.id, s.name))
+
+    const totals = new Map<string, number>()
+    for (const r of data ?? []) {
+      const links = productSupply.get(r.product_id)
+      if (!links) continue
+      for (const link of links) {
+        totals.set(
+          link.supply_id,
+          (totals.get(link.supply_id) ?? 0) +
+            Number(r.total_quantity) * link.quantity
+        )
+      }
+    }
+    return Array.from(totals, ([id, qty]) => ({
+      name: supplyName.get(id) ?? 'Insumo',
+      qty,
+    })).sort((a, b) => b.qty - a.qty)
+  }, [data, products, supplies])
 
   const groups: DriverGroup[] = useMemo(() => {
     const m = new Map<string, DriverGroup>()
@@ -132,7 +214,12 @@ export default function DeliveriesSummaryPage() {
             </div>
           )}
           <div>
-            <Label>Rango de fechas (de la ruta)</Label>
+            <div className="mb-1 flex items-center gap-1.5">
+              <span className="text-sm font-medium text-slate-700">
+                Rango de fechas (de la ruta)
+              </span>
+              <InfoHint text="Deja ambas para ver todo, o pon la misma fecha en las dos para un solo día." />
+            </div>
             <div className="flex flex-wrap items-center gap-2">
               <TextInput
                 type="date"
@@ -152,10 +239,6 @@ export default function DeliveriesSummaryPage() {
                 aria-label="Hasta"
               />
             </div>
-            <p className="mt-1 text-xs text-slate-400">
-              Deja ambas para ver todo, o pon la misma fecha en las dos para un
-              solo día.
-            </p>
           </div>
         </div>
 
@@ -167,6 +250,82 @@ export default function DeliveriesSummaryPage() {
           </div>
         )}
       </Card>
+
+      {/* Resumen personal del repartidor */}
+      {isRepartidor && (
+        <div className="mb-4 space-y-4">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
+              <p className="flex items-center gap-1.5 text-sm font-medium text-emerald-700 opacity-80">
+                Ventas en efectivo
+                <InfoHint text="Total cobrado en EFECTIVO de tus pedidos marcados como Pagado dentro del rango de fechas. No incluye transferencias." />
+              </p>
+              <p className="mt-1 text-2xl font-bold tabular-nums text-emerald-700">
+                {formatMoney(ventasEfectivo)}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-red-100 bg-red-50 p-4">
+              <p className="flex items-center gap-1.5 text-sm font-medium text-red-700 opacity-80">
+                Mis costos
+                <InfoHint text="Suma de los costos que TÚ registraste (en el módulo Costos) dentro del rango de fechas." />
+              </p>
+              <p className="mt-1 text-2xl font-bold tabular-nums text-red-700">
+                {formatMoney(totalCostos)}
+              </p>
+            </div>
+            <div
+              className={`rounded-2xl border p-4 ${
+                ventasEfectivo - totalCostos >= 0
+                  ? 'border-emerald-100 bg-emerald-50 text-emerald-700'
+                  : 'border-red-100 bg-red-50 text-red-700'
+              }`}
+            >
+              <p className="flex items-center gap-1.5 text-sm font-medium opacity-80">
+                Balance efectivo
+                <InfoHint text="Ventas en efectivo menos tus costos. Es aproximadamente el efectivo que deberías tener en mano." />
+              </p>
+              <p className="mt-1 text-2xl font-bold tabular-nums">
+                {formatMoney(ventasEfectivo - totalCostos)}
+              </p>
+            </div>
+          </div>
+
+          <Card className="overflow-hidden">
+            <div className="border-b border-slate-100 bg-slate-50 px-4 py-3 font-semibold text-slate-900">
+              🛒 Insumos entregados
+            </div>
+            {suppliesSummary.length === 0 ? (
+              <p className="px-4 py-3 text-sm text-slate-500">
+                Sin insumos en el período.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+                      <th className="px-4 py-2">Insumo</th>
+                      <th className="px-4 py-2 text-right">Cantidad entregada</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {suppliesSummary.map((s) => (
+                      <tr
+                        key={s.name}
+                        className="border-b border-slate-100 last:border-0"
+                      >
+                        <td className="px-4 py-2 text-slate-800">{s.name}</td>
+                        <td className="px-4 py-2 text-right font-medium tabular-nums text-slate-900">
+                          {s.qty}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+        </div>
+      )}
 
       {isLoading ? (
         <Spinner />
@@ -182,7 +341,7 @@ export default function DeliveriesSummaryPage() {
             <Card key={g.driver_id} className="overflow-hidden">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-4 py-3">
                 <span className="font-semibold text-slate-900">
-                  🚚 {g.name}
+                  {isRepartidor ? '📦 Productos entregados' : `🚚 ${g.name}`}
                 </span>
                 <span className="text-sm text-slate-500">
                   {g.total} {g.total === 1 ? 'unidad' : 'unidades'} en total

@@ -148,6 +148,32 @@ export async function createUser(input: NewUserInput): Promise<void> {
   }
 }
 
+/**
+ * Actualiza la contraseña y/o el nombre de un usuario. El cambio de contraseña
+ * lo hace la Edge Function "admin-update-user" con el service role.
+ */
+export async function updateUser(
+  id: string,
+  input: { password?: string; full_name?: string }
+): Promise<void> {
+  const { error } = await supabase.functions.invoke('admin-update-user', {
+    body: { id, ...input },
+  })
+  if (error) {
+    let message = error.message
+    const context = (error as { context?: Response }).context
+    if (context && typeof context.json === 'function') {
+      try {
+        const bodyErr = await context.json()
+        if (bodyErr?.error) message = bodyErr.error
+      } catch {
+        /* sin cuerpo JSON */
+      }
+    }
+    throw new Error(message)
+  }
+}
+
 export async function updateUserRole(id: string, role: Role): Promise<void> {
   const { error } = await supabase
     .from('profiles')

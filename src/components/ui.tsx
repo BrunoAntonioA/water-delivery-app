@@ -41,6 +41,34 @@ export function Label({ children }: { children: ReactNode }) {
   )
 }
 
+/** Ícono de ayuda: muestra un mensaje al pasar el mouse o al hacer clic. */
+export function InfoHint({ text }: { text: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <span className="relative inline-flex align-middle">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        onBlur={() => setOpen(false)}
+        aria-label="Más información"
+        className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-slate-300 text-[11px] font-bold leading-none text-white hover:bg-slate-400"
+      >
+        !
+      </button>
+      {open && (
+        <span
+          role="tooltip"
+          className="absolute left-0 top-full z-30 mt-1 w-56 rounded-lg bg-slate-800 px-3 py-2 text-xs font-normal leading-snug text-white shadow-lg"
+        >
+          {text}
+        </span>
+      )}
+    </span>
+  )
+}
+
 export function TextInput(props: InputHTMLAttributes<HTMLInputElement>) {
   return (
     <input
