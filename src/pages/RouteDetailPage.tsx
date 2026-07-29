@@ -339,22 +339,37 @@ export default function RouteDetailPage() {
             </p>
           )}
         </div>
-        <div className="flex shrink-0 flex-wrap gap-2">
-          <Link to={`/rutas/${id}/carga`}>
-            <Button variant="secondary">🛒 Ver carga</Button>
+        <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:shrink-0">
+          <Link to={`/rutas/${id}/carga`} className="flex-1 sm:flex-none">
+            <Button variant="secondary" className="w-full">
+              🛒 Ver carga
+            </Button>
           </Link>
           {!loadBlocked && (
             <>
-              <Button variant="success" onClick={openQuick}>
+              <Button
+                variant="success"
+                onClick={openQuick}
+                className="flex-1 sm:flex-none"
+              >
                 ⚡ Venta rápida
               </Button>
-              <Button variant="secondary" onClick={openPickup}>
+              <Button
+                variant="secondary"
+                onClick={openPickup}
+                className="flex-1 sm:flex-none"
+              >
                 🔄 Retiro
               </Button>
             </>
           )}
           {canManage && (
-            <Button onClick={() => setAddOpen(true)}>+ Agregar pedido</Button>
+            <Button
+              onClick={() => setAddOpen(true)}
+              className="flex-1 sm:flex-none"
+            >
+              + Agregar pedido
+            </Button>
           )}
         </div>
       </div>
