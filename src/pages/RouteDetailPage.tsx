@@ -16,17 +16,23 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useMemo, useState } from 'react'
+import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
   addOrderToRoute,
   addQuickSale,
+  addRoutePickup,
   getRoute,
   listAssignableOrders,
+  removeRoutePickup,
   removeStop,
   reorderStops,
+  setRoutePickupDone,
 } from '../api/routes'
 import { listProducts } from '../api/products'
+import { listSupplies } from '../api/supplies'
+import { listClients } from '../api/clients'
+import { ClientCombobox } from '../components/ClientCombobox'
 import type { OrderDetail, RouteStopWithOrder } from '../types/db'
 import { useAuth } from '../lib/auth'
 import { useIsMobile } from '../lib/useIsMobile'
@@ -48,7 +54,26 @@ import {
   TextInput,
 } from '../components/ui'
 
+// Datos/acciones extra para pintar las paradas de tipo "retiro" sin pasar props
+// por todas las capas de fila/tarjeta.
+const StopExtrasContext = createContext<{
+  supplyName: Map<string, string>
+  onPickupDone: (pickupId: string, done: boolean) => void
+}>({ supplyName: new Map(), onPickupDone: () => {} })
+
+/** Texto de los insumos de un retiro: "3× Bidón 20L, 2× ...". */
+function pickupItemsText(
+  pickup: { items: { supply_id: string; quantity: number }[] },
+  supplyName: Map<string, string>
+): string {
+  if (!pickup.items?.length) return '—'
+  return pickup.items
+    .map((it) => `${it.quantity}× ${supplyName.get(it.supply_id) ?? 'Insumo'}`)
+    .join(', ')
+}
+
 function stopAddress(stop: RouteStopWithOrder): string {
+  if (stop.pickup) return stop.pickup.address || '—'
   const a = stop.order?.address
   if (!a) return '—'
   return [a.address, a.comuna].filter(Boolean).join(', ')
@@ -57,6 +82,7 @@ function stopAddress(stop: RouteStopWithOrder): string {
 // Un pedido está "pendiente de entrega" si aún está en estado Pedido (o no
 // tiene pedido asociado). Ya fue entregado si está Entregado o Pagado.
 function isPending(stop: RouteStopWithOrder): boolean {
+  if (stop.pickup) return !stop.pickup.done
   return !stop.order || stop.order.status === 'ordered'
 }
 
@@ -84,11 +110,56 @@ export default function RouteDetailPage() {
     queryKey: ['products'],
     queryFn: listProducts,
   })
+  const { data: supplies } = useQuery({
+    queryKey: ['supplies'],
+    queryFn: listSupplies,
+  })
+  const { data: clients } = useQuery({
+    queryKey: ['clients'],
+    queryFn: listClients,
+  })
   const productMap = useMemo(() => {
     const m = new Map<string, number>()
     products?.forEach((p) => m.set(p.id, p.price))
     return m
   }, [products])
+  const supplyName = useMemo(() => {
+    const m = new Map<string, string>()
+    supplies?.forEach((s) => m.set(s.id, s.name))
+    return m
+  }, [supplies])
+
+  // Retiro rápido (parada de la ruta: cliente opcional + nombre + dirección + insumos).
+  const [pickupOpen, setPickupOpen] = useState(false)
+  const [pickupClientId, setPickupClientId] = useState('')
+  const [pickupName, setPickupName] = useState('')
+  const [pickupAddress, setPickupAddress] = useState('')
+  const [pickupItems, setPickupItems] = useState<
+    { supply_id: string; quantity: number }[]
+  >([{ supply_id: '', quantity: 1 }])
+  const pickupValid =
+    pickupItems.filter((it) => it.supply_id && it.quantity > 0).length > 0
+
+  function openPickup() {
+    setPickupClientId('')
+    setPickupName('')
+    setPickupAddress('')
+    setPickupItems([{ supply_id: '', quantity: 1 }])
+    setPickupOpen(true)
+  }
+
+  // Al elegir un cliente, prellenamos nombre y dirección (editables).
+  function choosePickupClient(clientId: string) {
+    setPickupClientId(clientId)
+    const c = clients?.find((cl) => cl.id === clientId)
+    if (c) {
+      setPickupName(`${c.name} ${c.surname}`.trim())
+      const a = c.addresses?.[0]
+      if (a) {
+        setPickupAddress([a.address, a.comuna].filter(Boolean).join(', '))
+      }
+    }
+  }
 
   // Copia local de las paradas para reordenar de forma instantánea (optimista).
   const [items, setItems] = useState<RouteStopWithOrder[]>([])
@@ -137,6 +208,37 @@ export default function RouteDetailPage() {
 
   const removeMutation = useMutation({
     mutationFn: (stopId: string) => removeStop(stopId),
+    onSuccess: invalidateRoute,
+  })
+
+  const addPickupMutation = useMutation({
+    mutationFn: () =>
+      addRoutePickup(
+        id,
+        pickupName.trim(),
+        pickupAddress.trim(),
+        pickupItems
+          .filter((it) => it.supply_id && it.quantity > 0)
+          .map((it) => ({
+            supply_id: it.supply_id,
+            quantity: Math.max(1, Math.trunc(it.quantity) || 1),
+          })),
+        pickupClientId || null
+      ),
+    onSuccess: () => {
+      invalidateRoute()
+      setPickupOpen(false)
+    },
+  })
+
+  const removePickupMutation = useMutation({
+    mutationFn: (pickupId: string) => removeRoutePickup(pickupId),
+    onSuccess: invalidateRoute,
+  })
+
+  const pickupDoneMutation = useMutation({
+    mutationFn: ({ pickupId, done }: { pickupId: string; done: boolean }) =>
+      setRoutePickupDone(pickupId, done),
     onSuccess: invalidateRoute,
   })
 
@@ -242,9 +344,14 @@ export default function RouteDetailPage() {
             <Button variant="secondary">🛒 Ver carga</Button>
           </Link>
           {!loadBlocked && (
-            <Button variant="success" onClick={openQuick}>
-              ⚡ Venta rápida
-            </Button>
+            <>
+              <Button variant="success" onClick={openQuick}>
+                ⚡ Venta rápida
+              </Button>
+              <Button variant="secondary" onClick={openPickup}>
+                🔄 Retiro
+              </Button>
+            </>
           )}
           {canManage && (
             <Button onClick={() => setAddOpen(true)}>+ Agregar pedido</Button>
@@ -268,6 +375,13 @@ export default function RouteDetailPage() {
             : 'Esta ruta no tiene pedidos asignados todavía.'}
         </EmptyState>
       ) : (
+        <StopExtrasContext.Provider
+          value={{
+            supplyName,
+            onPickupDone: (pickupId, done) =>
+              pickupDoneMutation.mutate({ pickupId, done }),
+          }}
+        >
         <div className="space-y-8">
           {/* --- Por entregar (arrastrable) --- */}
           <section>
@@ -299,7 +413,11 @@ export default function RouteDetailPage() {
                           index={index}
                           canManage={canManage}
                           onChanged={invalidateRoute}
-                          onRemove={() => removeMutation.mutate(stop.id)}
+                          onRemove={() =>
+                            stop.pickup
+                              ? removePickupMutation.mutate(stop.pickup.id)
+                              : removeMutation.mutate(stop.id)
+                          }
                         />
                       ))}
                     </div>
@@ -316,7 +434,11 @@ export default function RouteDetailPage() {
                                 index={index}
                                 canManage={canManage}
                                 onChanged={invalidateRoute}
-                                onRemove={() => removeMutation.mutate(stop.id)}
+                                onRemove={() =>
+                            stop.pickup
+                              ? removePickupMutation.mutate(stop.pickup.id)
+                              : removeMutation.mutate(stop.id)
+                          }
                               />
                             ))}
                           </tbody>
@@ -353,7 +475,11 @@ export default function RouteDetailPage() {
                       stop={stop}
                       canManage={canManage}
                       onChanged={invalidateRoute}
-                      onRemove={() => removeMutation.mutate(stop.id)}
+                      onRemove={() =>
+                            stop.pickup
+                              ? removePickupMutation.mutate(stop.pickup.id)
+                              : removeMutation.mutate(stop.id)
+                          }
                     />
                   ))}
                 </div>
@@ -369,7 +495,11 @@ export default function RouteDetailPage() {
                             stop={stop}
                             canManage={canManage}
                             onChanged={invalidateRoute}
-                            onRemove={() => removeMutation.mutate(stop.id)}
+                            onRemove={() =>
+                            stop.pickup
+                              ? removePickupMutation.mutate(stop.pickup.id)
+                              : removeMutation.mutate(stop.id)
+                          }
                           />
                         ))}
                       </tbody>
@@ -380,6 +510,7 @@ export default function RouteDetailPage() {
             </section>
           )}
         </div>
+        </StopExtrasContext.Provider>
       )}
 
       <Modal
@@ -517,6 +648,146 @@ export default function RouteDetailPage() {
           </div>
         </form>
       </Modal>
+
+      {/* --- Retiro (parada para recoger insumos) --- */}
+      <Modal
+        open={pickupOpen}
+        onClose={() => setPickupOpen(false)}
+        title="Agregar retiro"
+      >
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (pickupValid) addPickupMutation.mutate()
+          }}
+          className="space-y-4"
+        >
+          <div>
+            <Label>Cliente (opcional)</Label>
+            <ClientCombobox
+              clients={clients ?? []}
+              value={pickupClientId}
+              onChange={choosePickupClient}
+            />
+            <p className="mt-1 text-xs text-slate-400">
+              Si hay un cliente involucrado, elígelo y se prellenan nombre y
+              dirección.
+            </p>
+          </div>
+          <div>
+            <Label>Nombre / referencia</Label>
+            <TextInput
+              value={pickupName}
+              onChange={(e) => setPickupName(e.target.value)}
+              placeholder="Ej: Planta Puquén"
+            />
+          </div>
+          <div>
+            <Label>Dirección</Label>
+            <TextInput
+              value={pickupAddress}
+              onChange={(e) => setPickupAddress(e.target.value)}
+              placeholder="Dónde se retira"
+            />
+          </div>
+
+          <div>
+            <div className="mb-1 flex items-center justify-between">
+              <Label>Insumos a retirar *</Label>
+              <button
+                type="button"
+                onClick={() =>
+                  setPickupItems((l) => [...l, { supply_id: '', quantity: 1 }])
+                }
+                className="text-sm font-medium text-sky-600 hover:text-sky-700"
+              >
+                + Agregar insumo
+              </button>
+            </div>
+            <div className="space-y-2">
+              {pickupItems.map((it, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <select
+                    value={it.supply_id}
+                    onChange={(e) =>
+                      setPickupItems((l) =>
+                        l.map((x, idx) =>
+                          idx === i ? { ...x, supply_id: e.target.value } : x
+                        )
+                      )
+                    }
+                    className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                  >
+                    <option value="">Insumo…</option>
+                    {supplies?.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="w-16 shrink-0">
+                    <TextInput
+                      type="number"
+                      min="1"
+                      value={it.quantity}
+                      onChange={(e) =>
+                        setPickupItems((l) =>
+                          l.map((x, idx) =>
+                            idx === i
+                              ? {
+                                  ...x,
+                                  quantity: Math.max(
+                                    1,
+                                    Number(e.target.value) || 1
+                                  ),
+                                }
+                              : x
+                          )
+                        )
+                      }
+                      className="text-center"
+                    />
+                  </div>
+                  {pickupItems.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPickupItems((l) => l.filter((_, idx) => idx !== i))
+                      }
+                      className="shrink-0 rounded-lg px-2 py-2 text-slate-400 hover:bg-slate-100 hover:text-red-600"
+                      aria-label="Quitar insumo"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {addPickupMutation.isError && (
+            <p className="text-sm text-red-600">
+              Error: {(addPickupMutation.error as Error).message}
+            </p>
+          )}
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setPickupOpen(false)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="submit"
+              disabled={!pickupValid || addPickupMutation.isPending}
+            >
+              {addPickupMutation.isPending ? 'Guardando…' : 'Agregar retiro'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
     </div>
   )
 }
@@ -562,7 +833,91 @@ function StopCells({
   onRemove: () => void
   showReturned?: boolean
 }) {
+  const { supplyName, onPickupDone } = useContext(StopExtrasContext)
   const order = stop.order
+  const pickup = stop.pickup
+
+  // --- Fila de RETIRO ---
+  if (pickup) {
+    const address = stopAddress(stop)
+    return (
+      <>
+        <td className="px-3 py-2 font-medium text-slate-800">
+          <div className="flex items-center gap-2">
+            <span>{pickup.customer_name || 'Retiro'}</span>
+            <span className="rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-800">
+              Retiro
+            </span>
+          </div>
+        </td>
+        <td className="px-3 py-2 text-slate-600">
+          {pickupItemsText(pickup, supplyName)}
+        </td>
+        <td className="px-3 py-2 text-slate-600">
+          <div className="flex items-center gap-1">
+            <span className="min-w-0">{address}</span>
+            {pickup.address && (
+              <>
+                <CopyButton value={pickup.address} label="Copiar dirección" />
+                <MapButton query={pickup.address} />
+              </>
+            )}
+          </div>
+        </td>
+        <td className="px-3 py-2 text-slate-600">
+          <div className="flex items-center gap-1">
+            <span>{pickup.client?.phone ?? '—'}</span>
+            {pickup.client?.phone && (
+              <>
+                <CallButton phone={pickup.client.phone} />
+                <CopyButton
+                  value={pickup.client.phone}
+                  label="Copiar teléfono"
+                />
+              </>
+            )}
+          </div>
+        </td>
+        <td className="px-3 py-2 text-right text-slate-400">—</td>
+        <td className="px-3 py-2">
+          <span
+            className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+              pickup.done
+                ? 'bg-emerald-100 text-emerald-800'
+                : 'bg-amber-100 text-amber-800'
+            }`}
+          >
+            {pickup.done ? 'Recogido' : 'Por retirar'}
+          </span>
+        </td>
+        {showReturned && <td className="px-3 py-2 text-slate-400">—</td>}
+        {showReturned && (
+          <td className="px-3 py-2 text-center text-slate-400">—</td>
+        )}
+        <td className="px-3 py-2">
+          <Button
+            variant={pickup.done ? 'secondary' : 'success'}
+            onClick={() => onPickupDone(pickup.id, !pickup.done)}
+          >
+            {pickup.done ? 'Deshacer' : 'Recogido'}
+          </Button>
+        </td>
+        <td className="px-2 py-2 text-center">
+          {canManage && (
+            <button
+              type="button"
+              onClick={onRemove}
+              className="rounded-lg px-2 text-slate-400 hover:bg-slate-100 hover:text-red-600"
+              aria-label="Quitar de la ruta"
+            >
+              ✕
+            </button>
+          )}
+        </td>
+      </>
+    )
+  }
+
   const clientName = order ? orderClientName(order) : 'Pedido'
   return (
     <>
@@ -731,7 +1086,79 @@ function StopCardInner({
   leading: React.ReactNode
   orderNo?: number
 }) {
+  const { supplyName, onPickupDone } = useContext(StopExtrasContext)
   const order = stop.order
+  const pickup = stop.pickup
+
+  // --- Tarjeta de RETIRO ---
+  if (pickup) {
+    return (
+      <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+        <div className="flex items-start gap-2">
+          <div className="shrink-0">{leading}</div>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-semibold text-slate-800">
+                {orderNo != null && (
+                  <span className="mr-1 text-slate-400">{orderNo}.</span>
+                )}
+                {pickup.customer_name || 'Retiro'}
+              </span>
+              <span className="rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-800">
+                Retiro
+              </span>
+            </div>
+            <div className="mt-1.5 flex items-start gap-2 text-sm">
+              <span aria-hidden>🔄</span>
+              <span className="min-w-0">
+                {pickupItemsText(pickup, supplyName)}
+              </span>
+            </div>
+            {pickup.address && (
+              <div className="mt-1 flex items-start gap-2 text-sm text-slate-600">
+                <span aria-hidden>📍</span>
+                <span className="min-w-0 flex-1 break-words">
+                  {pickup.address}
+                </span>
+                <CopyButton value={pickup.address} label="Copiar dirección" />
+                <MapButton query={pickup.address} />
+              </div>
+            )}
+            {pickup.client?.phone && (
+              <div className="mt-0.5 flex items-center gap-2 text-sm text-slate-500">
+                <span aria-hidden>📞</span>
+                <span className="flex-1">{pickup.client.phone}</span>
+                <CallButton phone={pickup.client.phone} />
+                <CopyButton
+                  value={pickup.client.phone}
+                  label="Copiar teléfono"
+                />
+              </div>
+            )}
+          </div>
+          {canManage && (
+            <button
+              type="button"
+              onClick={onRemove}
+              aria-label="Quitar de la ruta"
+              className="shrink-0 rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100 hover:text-red-600"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+        <div className="mt-2 border-t border-slate-100 pt-2">
+          <Button
+            variant={pickup.done ? 'secondary' : 'success'}
+            onClick={() => onPickupDone(pickup.id, !pickup.done)}
+          >
+            {pickup.done ? 'Deshacer retiro' : 'Marcar recogido'}
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
   const clientName = order ? orderClientName(order) : 'Pedido'
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">

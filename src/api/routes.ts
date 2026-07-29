@@ -74,7 +74,7 @@ export async function getRoute(id: string): Promise<RouteDetail> {
   const { data, error } = await supabase
     .from('routes')
     .select(
-      `*, stops:route_stops(*, ${ORDER_SELECT}), loads:route_loads(*), driver_profile:profiles!driver_id(full_name, email)`
+      `*, stops:route_stops(*, ${ORDER_SELECT}, pickup:route_pickups(*, client:clients(*))), loads:route_loads(*), driver_profile:profiles!driver_id(full_name, email)`
     )
     .eq('id', id)
     .single()
@@ -225,6 +225,49 @@ export async function saveRouteLoads(
     .update({ load_confirmed: true })
     .eq('id', routeId)
   if (updErr) throw updErr
+}
+
+// --- Retiros de insumos (pickups): son paradas de la ruta como una venta rápida ---
+
+export interface PickupItemInput {
+  supply_id: string
+  quantity: number
+}
+
+/** Crea un retiro (con nombre, dirección e insumos) como una parada de la ruta. */
+export async function addRoutePickup(
+  routeId: string,
+  customerName: string,
+  address: string,
+  items: PickupItemInput[],
+  clientId: string | null
+): Promise<string> {
+  const { data, error } = await supabase.rpc('add_route_pickup', {
+    p_route_id: routeId,
+    p_customer_name: customerName,
+    p_address: address,
+    p_items: items,
+    p_client_id: clientId,
+  })
+  if (error) throw error
+  return data as string
+}
+
+/** Elimina un retiro (y su parada, por el on delete cascade). */
+export async function removeRoutePickup(id: string): Promise<void> {
+  const { error } = await supabase.from('route_pickups').delete().eq('id', id)
+  if (error) throw error
+}
+
+export async function setRoutePickupDone(
+  id: string,
+  done: boolean
+): Promise<void> {
+  const { error } = await supabase
+    .from('route_pickups')
+    .update({ done })
+    .eq('id', id)
+  if (error) throw error
 }
 
 /** Persiste el nuevo orden de las paradas (una actualización por parada). */

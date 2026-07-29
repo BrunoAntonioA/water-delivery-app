@@ -19,7 +19,7 @@ begin
     create type order_status as enum ('ordered', 'delivered', 'paid');
   end if;
   if not exists (select 1 from pg_type where typname = 'payment_method') then
-    create type payment_method as enum ('transferencia', 'efectivo');
+    create type payment_method as enum ('transferencia', 'efectivo', 'tarjeta');
   end if;
   if not exists (select 1 from pg_type where typname = 'user_role') then
     -- superadmin: administra empresas (tú). admin: dueño de una empresa.
@@ -27,6 +27,10 @@ begin
     create type user_role as enum ('superadmin', 'admin', 'operador', 'repartidor');
   end if;
 end$$;
+
+-- Nuevo método de pago "tarjeta" para bases que ya tenían el enum sin él.
+-- (ADD VALUE debe ir fuera del bloque DO; es idempotente con IF NOT EXISTS.)
+alter type payment_method add value if not exists 'tarjeta';
 
 -- ----------------------------------------------------------------------------
 --  Clientes
@@ -224,6 +228,40 @@ begin
   end if;
 end$$;
 
+-- ----------------------------------------------------------------------------
+--  Retiros de la ruta: paradas donde el repartidor RECOGE insumos (ej: pasar por
+--  la planta o un cliente a buscar bidones). Es una parada más de la ruta (como
+--  una venta rápida) con nombre, dirección e insumos, pero sin cobro.
+--  items: [{"supply_id": "uuid", "quantity": 2}, ...]
+-- ----------------------------------------------------------------------------
+create table if not exists route_pickups (
+  id            uuid primary key default gen_random_uuid(),
+  route_id      uuid not null references routes (id) on delete cascade,
+  customer_name text,
+  address       text,
+  items         jsonb not null default '[]',
+  done          boolean not null default false,
+  created_at    timestamptz not null default now()
+);
+create index if not exists route_pickups_route_id_idx on route_pickups (route_id);
+-- Migración desde la versión anterior (una fila = un insumo) a esta (cabecera
+-- con nombre/dirección/insumos). Idempotente.
+alter table route_pickups add column if not exists customer_name text;
+alter table route_pickups add column if not exists address text;
+alter table route_pickups add column if not exists items jsonb not null default '[]';
+alter table route_pickups add column if not exists done boolean not null default false;
+alter table route_pickups drop column if exists supply_id;
+alter table route_pickups drop column if exists quantity;
+alter table route_pickups drop column if exists location;
+alter table route_pickups drop column if exists note;
+
+-- Cliente opcional asociado al retiro (si hay uno involucrado).
+alter table route_pickups add column if not exists client_id uuid references clients (id) on delete set null;
+
+-- Una parada de ruta puede ser un PEDIDO (order_id) o un RETIRO (pickup_id).
+alter table route_stops alter column order_id drop not null;
+alter table route_stops add column if not exists pickup_id uuid references route_pickups (id) on delete cascade;
+
 -- Bandera: la carga inicial ya fue registrada. Hasta entonces, al repartidor se
 -- le ocultan los pedidos (debe registrar qué cargó primero).
 alter table routes add column if not exists load_confirmed boolean not null default false;
@@ -375,6 +413,64 @@ end$$;
 
 grant execute on function public.add_quick_sale(uuid, text, jsonb) to authenticated;
 
+-- Retiro: crea un route_pickup y su parada (route_stop) en una sola operación.
+-- SECURITY DEFINER (evita RLS del repartidor) pero valida empresa/ruta propia.
+-- p_items: [{"supply_id": "uuid", "quantity": 2}, ...]
+drop function if exists public.add_route_pickup(uuid, text, text, jsonb);
+create or replace function public.add_route_pickup(
+  p_route_id uuid,
+  p_customer_name text,
+  p_address text,
+  p_items jsonb,
+  p_client_id uuid default null
+) returns uuid
+language plpgsql security definer set search_path = public as $$
+declare
+  v_company uuid;
+  v_driver  uuid;
+  v_pickup  uuid;
+  v_pos     int;
+begin
+  select company_id, driver_id into v_company, v_driver
+    from routes where id = p_route_id;
+  if v_company is null then
+    raise exception 'Ruta no encontrada';
+  end if;
+  if v_company <> current_company_id() then
+    raise exception 'No autorizado';
+  end if;
+  if current_user_role() = 'repartidor'
+     and v_driver is distinct from auth.uid() then
+    raise exception 'No autorizado';
+  end if;
+  -- El cliente (si se envía) debe ser de la misma empresa.
+  if p_client_id is not null
+     and not exists (
+       select 1 from clients c where c.id = p_client_id and c.company_id = v_company
+     ) then
+    raise exception 'Cliente inválido';
+  end if;
+
+  insert into route_pickups (company_id, route_id, client_id, customer_name, address, items)
+  values (
+    v_company,
+    p_route_id,
+    p_client_id,
+    nullif(trim(p_customer_name), ''),
+    nullif(trim(p_address), ''),
+    coalesce(p_items, '[]'::jsonb)
+  )
+  returning id into v_pickup;
+
+  select count(*) into v_pos from route_stops where route_id = p_route_id;
+  insert into route_stops (company_id, route_id, pickup_id, position)
+  values (v_company, p_route_id, v_pickup, v_pos);
+
+  return v_pickup;
+end$$;
+
+grant execute on function public.add_route_pickup(uuid, text, text, jsonb, uuid) to authenticated;
+
 -- ----------------------------------------------------------------------------
 --  Resumen de entregas por repartidor: cantidad entregada de cada producto en
 --  un rango de fechas (por fecha de la ruta). Un pedido cuenta como entregado
@@ -434,6 +530,7 @@ alter table order_items add column if not exists company_id uuid references comp
 alter table routes      add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
 alter table route_stops add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
 alter table route_loads add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
+alter table route_pickups add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
 alter table whatsapp_templates add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
 alter table cost_categories add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
 alter table costs add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
@@ -496,6 +593,7 @@ begin
   update routes      set company_id = cid where company_id is null;
   update route_stops set company_id = cid where company_id is null;
   update route_loads set company_id = cid where company_id is null;
+  update route_pickups set company_id = cid where company_id is null;
 end$$;
 
 -- Migración: si products tenía un único insumo (products.supply_id, versión
@@ -586,6 +684,7 @@ alter table order_items enable row level security;
 alter table routes      enable row level security;
 alter table route_stops enable row level security;
 alter table route_loads enable row level security;
+alter table route_pickups enable row level security;
 alter table whatsapp_templates enable row level security;
 alter table cost_categories enable row level security;
 alter table costs       enable row level security;
@@ -597,7 +696,7 @@ do $$
 declare
   t text;
 begin
-  foreach t in array array['clients', 'addresses', 'products', 'supplies', 'product_supplies', 'whatsapp_templates', 'cost_categories', 'costs', 'orders', 'order_items', 'routes', 'route_stops', 'route_loads']
+  foreach t in array array['clients', 'addresses', 'products', 'supplies', 'product_supplies', 'whatsapp_templates', 'cost_categories', 'costs', 'orders', 'order_items', 'routes', 'route_stops', 'route_loads', 'route_pickups']
   loop
     execute format('drop policy if exists "allow_all_%1$s" on %1$s;', t);       -- limpia política antigua
     execute format('drop policy if exists "tenant_%1$s" on %1$s;', t);
@@ -649,6 +748,17 @@ create policy "tenant_routes" on routes for all
   );
 
 -- Paradas: el repartidor sólo ve las de sus rutas asignadas.
+-- Retiros: el repartidor sólo ve/gestiona los de sus rutas asignadas.
+create policy "tenant_route_pickups" on route_pickups for all
+  using (
+    company_id = current_company_id()
+    and (current_user_role() <> 'repartidor' or is_my_route(route_id))
+  )
+  with check (
+    company_id = current_company_id()
+    and (current_user_role() <> 'repartidor' or is_my_route(route_id))
+  );
+
 create policy "tenant_route_stops" on route_stops for all
   using (
     company_id = current_company_id()

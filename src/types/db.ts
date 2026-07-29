@@ -1,6 +1,6 @@
 export type OrderStatus = 'ordered' | 'delivered' | 'paid'
 
-export type PaymentMethod = 'transferencia' | 'efectivo'
+export type PaymentMethod = 'transferencia' | 'efectivo' | 'tarjeta'
 
 export interface Client {
   id: string
@@ -133,16 +133,30 @@ export interface RouteLoad {
   quantity: number
 }
 
+export interface RoutePickup {
+  id: string
+  route_id: string
+  client_id: string | null
+  client: Client | null
+  customer_name: string | null
+  address: string | null
+  items: { supply_id: string; quantity: number }[]
+  done: boolean
+  created_at: string
+}
+
 export interface RouteStop {
   id: string
   route_id: string
-  order_id: string
+  order_id: string | null
+  pickup_id: string | null
   position: number
   created_at: string
 }
 
 export interface RouteStopWithOrder extends RouteStop {
   order: OrderDetail | null
+  pickup: RoutePickup | null
 }
 
 export interface RouteDetail extends Route {

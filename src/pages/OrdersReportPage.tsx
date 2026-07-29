@@ -6,6 +6,12 @@ import { listCosts } from '../api/costs'
 import { listDrivers, type Driver } from '../api/routes'
 import { listProducts } from '../api/products'
 import { listSupplies } from '../api/supplies'
+import { useAuth } from '../lib/auth'
+import {
+  makeReportDoc,
+  addReportTable,
+  saveReport,
+} from '../lib/reportPdf'
 import type {
   CostWithCategory,
   OrderDetail,
@@ -46,22 +52,9 @@ const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
   { value: 'paid', label: 'Pagado' },
 ]
 
-/** Descarga un CSV (con BOM para que Excel abra los acentos bien). */
-function downloadCsv(filename: string, rows: (string | number)[][]) {
-  const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`
-  const csv = '﻿' + rows.map((r) => r.map(esc).join(',')).join('\r\n')
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
-}
 
 export default function OrdersReportPage() {
+  const { company } = useAuth()
   const { data: orders, isLoading } = useQuery({
     queryKey: ['orders'],
     queryFn: listOrders,
@@ -164,56 +157,42 @@ export default function OrdersReportPage() {
     setPage(1)
   }
 
-  function exportCsv() {
+  function exportPdf() {
     if (filtered.length === 0) return
-
-    const headers = [
-      'Fecha',
-      'Cliente',
-      'Repartidor',
-      'Teléfono',
-      'Dirección',
-      'Detalle',
-      'Total',
-      'Estado',
-      'Pago',
-    ]
-
-    const rowOf = (o: OrderDetail) => [
-      formatDate(o.created_at),
-      orderClientName(o),
-      o.driverName ?? '',
-      o.client?.phone ?? '',
-      o.address
-        ? [o.address.address, o.address.comuna].filter(Boolean).join(', ')
-        : '',
-      o.items
-        .map((it) => `${it.quantity} x ${it.product?.name ?? 'Producto'}`)
-        .join('; '),
-      String(Number(o.total)),
-      STATUS_LABELS[o.status],
-      o.status === 'paid' && o.payment_method
-        ? PAYMENT_LABELS[o.payment_method]
-        : '',
-    ]
-
-    // Escapa cada campo para CSV (comillas, comas y saltos de línea).
-    const esc = (v: string) => `"${String(v).replace(/"/g, '""')}"`
-    const lines = [headers, ...filtered.map(rowOf)].map((row) =>
-      row.map(esc).join(',')
+    const subtitle = `${filtered.length} pedidos · Total ${formatMoney(totalSum)} · Generado ${new Date().toLocaleDateString('es-CL')}`
+    const r = makeReportDoc('Reporte de pedidos', company?.name, subtitle, true)
+    addReportTable(
+      r,
+      [
+        'Fecha',
+        'Cliente',
+        'Repartidor',
+        'Teléfono',
+        'Dirección',
+        'Detalle',
+        'Total',
+        'Estado',
+        'Pago',
+      ],
+      filtered.map((o) => [
+        formatDate(o.created_at),
+        orderClientName(o),
+        o.driverName ?? '',
+        o.client?.phone ?? '',
+        o.address
+          ? [o.address.address, o.address.comuna].filter(Boolean).join(', ')
+          : '',
+        o.items
+          .map((it) => `${it.quantity} x ${it.product?.name ?? 'Producto'}`)
+          .join('; '),
+        formatMoney(o.total),
+        STATUS_LABELS[o.status],
+        o.status === 'paid' && o.payment_method
+          ? PAYMENT_LABELS[o.payment_method]
+          : '',
+      ])
     )
-    // BOM para que Excel abra los acentos correctamente.
-    const csv = '﻿' + lines.join('\r\n')
-
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'reporte-pedidos.csv'
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+    saveReport(r, 'reporte-pedidos.pdf')
   }
 
   return (
@@ -228,11 +207,11 @@ export default function OrdersReportPage() {
               tab === 'pedidos' ? filtered.length === 0 : !childCanExport
             }
             onClick={() => {
-              if (tab === 'pedidos') exportCsv()
+              if (tab === 'pedidos') exportPdf()
               else exporterRef.current?.()
             }}
           >
-            ⬇ Descargar CSV
+            ⬇ Descargar PDF
           </Button>
         }
       />
@@ -268,6 +247,7 @@ export default function OrdersReportPage() {
           products={products ?? []}
           supplies={supplies ?? []}
           drivers={driversList ?? []}
+          companyName={company?.name}
           registerExporter={registerExporter}
         />
       )}
@@ -275,6 +255,7 @@ export default function OrdersReportPage() {
         <CashFlowTab
           orders={orders ?? []}
           costs={costs ?? []}
+          companyName={company?.name}
           registerExporter={registerExporter}
         />
       )}
@@ -380,6 +361,7 @@ export default function OrdersReportPage() {
                   { value: 'all', label: 'Todos' },
                   { value: 'efectivo', label: 'Efectivo' },
                   { value: 'transferencia', label: 'Transferencia' },
+                  { value: 'tarjeta', label: 'Tarjeta' },
                 ] as { value: 'all' | PaymentMethod; label: string }[]
               ).map((f) => (
                 <button
@@ -501,10 +483,12 @@ export default function OrdersReportPage() {
 function CashFlowTab({
   orders,
   costs,
+  companyName,
   registerExporter,
 }: {
   orders: OrderDetail[]
   costs: CostWithCategory[]
+  companyName?: string
   registerExporter: (fn: (() => void) | null) => void
 }) {
   const [fromDate, setFromDate] = useState('')
@@ -513,6 +497,7 @@ function CashFlowTab({
   const income = useMemo(() => {
     let efectivo = 0
     let transferencia = 0
+    let tarjeta = 0
     let otros = 0
     for (const o of orders) {
       if (o.status !== 'paid') continue
@@ -522,9 +507,16 @@ function CashFlowTab({
       const amt = Number(o.paid_amount ?? o.total)
       if (o.payment_method === 'efectivo') efectivo += amt
       else if (o.payment_method === 'transferencia') transferencia += amt
+      else if (o.payment_method === 'tarjeta') tarjeta += amt
       else otros += amt
     }
-    return { efectivo, transferencia, otros, total: efectivo + transferencia + otros }
+    return {
+      efectivo,
+      transferencia,
+      tarjeta,
+      otros,
+      total: efectivo + transferencia + tarjeta + otros,
+    }
   }, [orders, fromDate, toDate])
 
   const expense = useMemo(() => {
@@ -546,27 +538,91 @@ function CashFlowTab({
 
   const balance = income.total - expense.total
 
-  function exportCsv() {
-    const rows: (string | number)[][] = [
-      ['Tipo', 'Detalle', 'Monto'],
-      ['Ingreso', 'Efectivo', income.efectivo],
-      ['Ingreso', 'Transferencia', income.transferencia],
-      ...(income.otros > 0
-        ? [['Ingreso', 'Sin método', income.otros] as (string | number)[]]
-        : []),
-      ...expense.rows.map((r) => ['Egreso', r.name, r.amount]),
-      ['Resumen', 'Total ingresos', income.total],
-      ['Resumen', 'Total egresos', expense.total],
-      ['Resumen', 'Balance', balance],
-    ]
-    downloadCsv('flujo-de-caja.csv', rows)
+  function exportPdf() {
+    const periodo =
+      fromDate || toDate
+        ? `Período: ${fromDate || 'inicio'} a ${toDate || 'hoy'}`
+        : 'Período: todo'
+    const r = makeReportDoc(
+      'Flujo de caja',
+      companyName,
+      `${periodo} · Generado ${new Date().toLocaleDateString('es-CL')}`
+    )
+    addReportTable(
+      r,
+      ['Resumen', 'Monto'],
+      [
+        ['Ingresos', formatMoney(income.total)],
+        ['Egresos (costos)', formatMoney(expense.total)],
+        ['Balance', formatMoney(balance)],
+      ],
+      { title: 'Resumen' }
+    )
+    addReportTable(
+      r,
+      ['Ingreso', 'Monto'],
+      [
+        ['Efectivo', formatMoney(income.efectivo)],
+        ['Transferencia', formatMoney(income.transferencia)],
+        ['Tarjeta', formatMoney(income.tarjeta)],
+        ...(income.otros > 0
+          ? [['Sin método', formatMoney(income.otros)]]
+          : []),
+      ],
+      { title: 'Ingresos por método' }
+    )
+    addReportTable(
+      r,
+      ['Categoría', 'Monto'],
+      expense.rows.map((x) => [x.name, formatMoney(x.amount)]),
+      { title: 'Costos por categoría' }
+    )
+
+    // Detalle de movimientos (ingresos + costos) ordenado por fecha.
+    const short = (d: string) => d.split('-').reverse().join('-')
+    type Mov = { date: string; tipo: string; detalle: string; monto: string }
+    const movimientos: Mov[] = []
+    for (const o of orders) {
+      if (o.status !== 'paid') continue
+      const date = toLocalDateStr(o.created_at)
+      if (fromDate && date < fromDate) continue
+      if (toDate && date > toDate) continue
+      const metodo = o.payment_method
+        ? PAYMENT_LABELS[o.payment_method]
+        : 'Sin método'
+      movimientos.push({
+        date,
+        tipo: 'Ingreso',
+        detalle: `${orderClientName(o)} · ${metodo}`,
+        monto: formatMoney(Number(o.paid_amount ?? o.total)),
+      })
+    }
+    for (const c of costs) {
+      if (fromDate && c.issue_date < fromDate) continue
+      if (toDate && c.issue_date > toDate) continue
+      movimientos.push({
+        date: c.issue_date,
+        tipo: 'Egreso',
+        detalle: `${c.name} · ${c.category?.name ?? 'Sin categoría'}`,
+        monto: `- ${formatMoney(Number(c.amount))}`,
+      })
+    }
+    movimientos.sort((a, b) => a.date.localeCompare(b.date))
+    addReportTable(
+      r,
+      ['Fecha', 'Tipo', 'Detalle', 'Monto'],
+      movimientos.map((m) => [short(m.date), m.tipo, m.detalle, m.monto]),
+      { title: 'Detalle por fecha' }
+    )
+
+    saveReport(r, 'flujo-de-caja.pdf')
   }
 
   const hasData = income.total > 0 || expense.total > 0
 
   // Registra el exportador para el botón del encabezado.
-  const exportRef = useRef(exportCsv)
-  exportRef.current = exportCsv
+  const exportRef = useRef(exportPdf)
+  exportRef.current = exportPdf
   useEffect(() => {
     registerExporter(hasData ? () => exportRef.current() : null)
     return () => registerExporter(null)
@@ -659,6 +715,12 @@ function CashFlowTab({
                 amount={income.transferencia}
                 total={income.total}
                 color="bg-sky-500"
+              />
+              <BreakdownRow
+                label="Tarjeta"
+                amount={income.tarjeta}
+                total={income.total}
+                color="bg-violet-500"
               />
               {income.otros > 0 && (
                 <BreakdownRow
@@ -778,6 +840,7 @@ function RepartidoresTab({
   products,
   supplies,
   drivers,
+  companyName,
   registerExporter,
 }: {
   orders: OrderDetail[]
@@ -785,6 +848,7 @@ function RepartidoresTab({
   products: Product[]
   supplies: Supply[]
   drivers: Driver[]
+  companyName?: string
   registerExporter: (fn: (() => void) | null) => void
 }) {
   const [driverId, setDriverId] = useState('')
@@ -852,22 +916,49 @@ function RepartidoresTab({
     return { efectivo, costos, balance: efectivo - costos, productos, insumos }
   }, [driverId, orders, costs, fromDate, toDate, productSupply, supplyName])
 
-  function exportCsv() {
+  function exportPdf() {
     if (!summary) return
-    const rows: (string | number)[][] = [
-      ['Sección', 'Detalle', 'Valor'],
-      ['Resumen', 'Ventas en efectivo', summary.efectivo],
-      ['Resumen', 'Costos', summary.costos],
-      ['Resumen', 'Balance efectivo', summary.balance],
-      ...summary.insumos.map((s) => ['Insumo', s.name, s.qty]),
-      ...summary.productos.map((p) => ['Producto', p.name, p.qty]),
-    ]
-    downloadCsv('reporte-repartidor.csv', rows)
+    const driverName =
+      drivers.find((d) => d.id === driverId)?.full_name ||
+      drivers.find((d) => d.id === driverId)?.email ||
+      'Repartidor'
+    const periodo =
+      fromDate || toDate
+        ? `Período: ${fromDate || 'inicio'} a ${toDate || 'hoy'}`
+        : 'Período: todo'
+    const r = makeReportDoc(
+      `Repartidor: ${driverName}`,
+      companyName,
+      `${periodo} · Generado ${new Date().toLocaleDateString('es-CL')}`
+    )
+    addReportTable(
+      r,
+      ['Resumen', 'Monto'],
+      [
+        ['Ventas en efectivo', formatMoney(summary.efectivo)],
+        ['Costos', formatMoney(summary.costos)],
+        ['Balance efectivo', formatMoney(summary.balance)],
+      ],
+      { title: 'Resumen' }
+    )
+    addReportTable(
+      r,
+      ['Insumo', 'Cantidad'],
+      summary.insumos.map((s) => [s.name, s.qty]),
+      { title: 'Insumos entregados' }
+    )
+    addReportTable(
+      r,
+      ['Producto', 'Cantidad'],
+      summary.productos.map((p) => [p.name, p.qty]),
+      { title: 'Productos entregados' }
+    )
+    saveReport(r, 'reporte-repartidor.pdf')
   }
 
   // Registra el exportador para el botón del encabezado.
-  const exportRef = useRef(exportCsv)
-  exportRef.current = exportCsv
+  const exportRef = useRef(exportPdf)
+  exportRef.current = exportPdf
   const canExport = Boolean(summary)
   useEffect(() => {
     registerExporter(canExport ? () => exportRef.current() : null)

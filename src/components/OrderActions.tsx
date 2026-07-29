@@ -390,8 +390,9 @@ function MethodSelector({
   return (
     <div>
       <Label>Método de pago *</Label>
-      <div className="grid grid-cols-2 gap-2">
-        {(['transferencia', 'efectivo'] as PaymentMethod[]).map((m) => (
+      <div className="grid grid-cols-3 gap-2">
+        {(['efectivo', 'transferencia', 'tarjeta'] as PaymentMethod[]).map(
+          (m) => (
           <button
             type="button"
             key={m}

@@ -9,6 +9,7 @@ export const STATUS_LABELS: Record<OrderStatus, string> = {
 export const PAYMENT_LABELS: Record<PaymentMethod, string> = {
   transferencia: 'Transferencia',
   efectivo: 'Efectivo',
+  tarjeta: 'Tarjeta',
 }
 
 const STATUS_CLASSES: Record<OrderStatus, string> = {

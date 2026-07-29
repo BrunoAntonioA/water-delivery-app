@@ -9,7 +9,7 @@ import {
 } from '../api/orders'
 import { createClient, listClients } from '../api/clients'
 import { listProducts } from '../api/products'
-import type { OrderDetail, OrderStatus } from '../types/db'
+import type { OrderDetail, OrderStatus, PaymentMethod } from '../types/db'
 import { formatDate, formatMoney, toLocalDateStr } from '../lib/format'
 import { useIsMobile } from '../lib/useIsMobile'
 import { orderClientName, returnedBidonesText } from '../lib/order'
@@ -82,6 +82,9 @@ export default function OrdersPage() {
 
   const [dateFilter, setDateFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [paymentFilter, setPaymentFilter] = useState<'all' | PaymentMethod>(
+    'all'
+  )
   const [page, setPage] = useState(1)
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['orders'] })
@@ -89,11 +92,13 @@ export default function OrdersPage() {
   const filteredOrders = useMemo(() => {
     return (orders ?? []).filter((o) => {
       if (dateFilter && toLocalDateStr(o.created_at) !== dateFilter) return false
-      if (statusFilter === 'all') return true
+      if (paymentFilter !== 'all' && o.payment_method !== paymentFilter)
+        return false
       if (statusFilter === 'unpaid') return o.status !== 'paid'
-      return o.status === statusFilter
+      if (statusFilter !== 'all' && o.status !== statusFilter) return false
+      return true
     })
-  }, [orders, dateFilter, statusFilter])
+  }, [orders, dateFilter, statusFilter, paymentFilter])
 
   const pageCount = Math.max(1, Math.ceil(filteredOrders.length / PAGE_SIZE))
   const currentPage = Math.min(page, pageCount)
@@ -268,6 +273,32 @@ export default function OrdersPage() {
                 className={`rounded-full px-3 py-1 text-sm font-medium transition-colors ${
                   statusFilter === f.value
                     ? 'bg-sky-600 text-white'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {(
+              [
+                { value: 'all', label: 'Todo pago' },
+                { value: 'efectivo', label: 'Efectivo' },
+                { value: 'transferencia', label: 'Transferencia' },
+                { value: 'tarjeta', label: 'Tarjeta' },
+              ] as { value: 'all' | PaymentMethod; label: string }[]
+            ).map((f) => (
+              <button
+                key={f.value}
+                type="button"
+                onClick={() => {
+                  setPaymentFilter(f.value)
+                  setPage(1)
+                }}
+                className={`rounded-full px-3 py-1 text-sm font-medium transition-colors ${
+                  paymentFilter === f.value
+                    ? 'bg-emerald-600 text-white'
                     : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                 }`}
               >
