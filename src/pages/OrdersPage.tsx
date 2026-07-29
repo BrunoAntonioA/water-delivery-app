@@ -85,6 +85,7 @@ export default function OrdersPage() {
   const [paymentFilter, setPaymentFilter] = useState<'all' | PaymentMethod>(
     'all'
   )
+  const [filterClientId, setFilterClientId] = useState('')
   const [page, setPage] = useState(1)
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['orders'] })
@@ -92,13 +93,25 @@ export default function OrdersPage() {
   const filteredOrders = useMemo(() => {
     return (orders ?? []).filter((o) => {
       if (dateFilter && toLocalDateStr(o.created_at) !== dateFilter) return false
+      if (filterClientId && o.client_id !== filterClientId) return false
       if (paymentFilter !== 'all' && o.payment_method !== paymentFilter)
         return false
       if (statusFilter === 'unpaid') return o.status !== 'paid'
       if (statusFilter !== 'all' && o.status !== statusFilter) return false
       return true
     })
-  }, [orders, dateFilter, statusFilter, paymentFilter])
+  }, [orders, dateFilter, statusFilter, paymentFilter, filterClientId])
+
+  const hasFilters = Boolean(
+    dateFilter || filterClientId || statusFilter !== 'all' || paymentFilter !== 'all'
+  )
+  function clearFilters() {
+    setDateFilter('')
+    setFilterClientId('')
+    setStatusFilter('all')
+    setPaymentFilter('all')
+    setPage(1)
+  }
 
   const pageCount = Math.max(1, Math.ceil(filteredOrders.length / PAGE_SIZE))
   const currentPage = Math.min(page, pageCount)
@@ -251,77 +264,103 @@ export default function OrdersPage() {
       )}
 
       {!isLoading && orders && orders.length > 0 && (
-        <div className="mb-4 flex flex-wrap items-center gap-2">
-          <TextInput
-            type="date"
-            value={dateFilter}
-            onChange={(e) => {
-              setDateFilter(e.target.value)
-              setPage(1)
-            }}
-            className="w-full sm:w-auto"
-          />
-          <div className="flex flex-wrap gap-1">
-            {STATUS_FILTERS.map((f) => (
-              <button
-                key={f.value}
-                type="button"
-                onClick={() => {
-                  setStatusFilter(f.value)
-                  setPage(1)
-                }}
-                className={`rounded-full px-3 py-1 text-sm font-medium transition-colors ${
-                  statusFilter === f.value
-                    ? 'bg-sky-600 text-white'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
-          <div className="flex flex-wrap gap-1">
-            {(
-              [
-                { value: 'all', label: 'Todo pago' },
-                { value: 'efectivo', label: 'Efectivo' },
-                { value: 'transferencia', label: 'Transferencia' },
-                { value: 'tarjeta', label: 'Tarjeta' },
-              ] as { value: 'all' | PaymentMethod; label: string }[]
-            ).map((f) => (
-              <button
-                key={f.value}
-                type="button"
-                onClick={() => {
-                  setPaymentFilter(f.value)
-                  setPage(1)
-                }}
-                className={`rounded-full px-3 py-1 text-sm font-medium transition-colors ${
-                  paymentFilter === f.value
-                    ? 'bg-emerald-600 text-white'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
-          {dateFilter && (
-            <Button
-              variant="ghost"
-              onClick={() => {
-                setDateFilter('')
-                setPage(1)
-              }}
-            >
-              Limpiar fecha
-            </Button>
-          )}
-          <span className="ml-auto text-sm text-slate-400">
+        <>
+          <Card className="mb-4 p-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <Label>Cliente</Label>
+                <ClientCombobox
+                  clients={clients ?? []}
+                  value={filterClientId}
+                  onChange={(cid) => {
+                    setFilterClientId(cid)
+                    setPage(1)
+                  }}
+                />
+              </div>
+              <div>
+                <Label>Fecha</Label>
+                <TextInput
+                  type="date"
+                  value={dateFilter}
+                  onChange={(e) => {
+                    setDateFilter(e.target.value)
+                    setPage(1)
+                  }}
+                  className="w-full sm:w-auto"
+                />
+              </div>
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-x-8 gap-y-4">
+              <div>
+                <Label>Estado</Label>
+                <div className="flex flex-wrap gap-1">
+                  {STATUS_FILTERS.map((f) => (
+                    <button
+                      key={f.value}
+                      type="button"
+                      onClick={() => {
+                        setStatusFilter(f.value)
+                        setPage(1)
+                      }}
+                      className={`rounded-full px-3 py-1 text-sm font-medium transition-colors ${
+                        statusFilter === f.value
+                          ? 'bg-sky-600 text-white'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <Label>Pago</Label>
+                <div className="flex flex-wrap gap-1">
+                  {(
+                    [
+                      { value: 'all', label: 'Todos' },
+                      { value: 'efectivo', label: 'Efectivo' },
+                      { value: 'transferencia', label: 'Transferencia' },
+                      { value: 'tarjeta', label: 'Tarjeta' },
+                    ] as { value: 'all' | PaymentMethod; label: string }[]
+                  ).map((f) => (
+                    <button
+                      key={f.value}
+                      type="button"
+                      onClick={() => {
+                        setPaymentFilter(f.value)
+                        setPage(1)
+                      }}
+                      className={`rounded-full px-3 py-1 text-sm font-medium transition-colors ${
+                        paymentFilter === f.value
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {hasFilters && (
+              <div className="mt-4">
+                <Button variant="ghost" onClick={clearFilters}>
+                  Limpiar filtros
+                </Button>
+              </div>
+            )}
+          </Card>
+
+          <div className="mb-3 text-sm text-slate-500">
             {filteredOrders.length}{' '}
             {filteredOrders.length === 1 ? 'pedido' : 'pedidos'}
-          </span>
-        </div>
+          </div>
+        </>
       )}
 
       {isLoading ? (
