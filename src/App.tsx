@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth } from './lib/auth'
-import { canAccess, ROLE_LABELS, ROLE_MODULES, type ModuleKey } from './types/auth'
+import { effectiveModules, ROLE_LABELS, type ModuleKey } from './types/auth'
 import { Button, Spinner } from './components/ui'
 import ClientsPage from './pages/ClientsPage'
 import ProductsPage from './pages/ProductsPage'
@@ -41,8 +41,11 @@ function Protected({
   home: string
   children: React.ReactNode
 }) {
-  const { profile } = useAuth()
-  if (!profile || !canAccess(profile.role, module)) {
+  const { profile, company } = useAuth()
+  const allowed = profile
+    ? effectiveModules(profile.role, company?.modules)
+    : []
+  if (!profile || !allowed.includes(module)) {
     return <Navigate to={home} replace />
   }
   return <>{children}</>
@@ -129,9 +132,28 @@ export default function App() {
     )
   }
 
-  const allowed = ROLE_MODULES[profile.role]
+  const allowed = effectiveModules(profile.role, company?.modules)
   const navItems = NAV.filter((n) => allowed.includes(n.module))
-  const home = navItems[0]?.to ?? '/pedidos'
+  const home = navItems[0]?.to ?? '/'
+
+  // Sin módulos habilitados (el superadmin los desactivó todos): evitamos un
+  // bucle de redirección mostrando un aviso.
+  if (navItems.length === 0) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 px-4 text-center">
+        <div className="text-4xl">🔒</div>
+        <div>
+          <p className="font-semibold text-slate-900">Sin módulos habilitados</p>
+          <p className="text-sm text-slate-500">
+            Tu empresa no tiene módulos activos. Contacta a tu administrador.
+          </p>
+        </div>
+        <Button variant="secondary" onClick={signOut}>
+          Cerrar sesión
+        </Button>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen overflow-x-clip">

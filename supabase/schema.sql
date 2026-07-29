@@ -278,6 +278,12 @@ create table if not exists companies (
   name       text not null,
   created_at timestamptz not null default now()
 );
+-- Módulos habilitados para la empresa (los gestiona sólo el superadmin). Por
+-- defecto, todos. 'empresas' no se incluye (es exclusivo del superadmin).
+alter table companies add column if not exists modules text[] not null default array[
+  'pedidos', 'reportes', 'entregas', 'rutas', 'clientes',
+  'productos', 'costos', 'plantillas', 'usuarios'
+];
 
 -- ----------------------------------------------------------------------------
 --  Perfiles: enlaza cada usuario de Supabase Auth con su empresa y rol.
@@ -843,6 +849,21 @@ drop policy if exists "companies_admin_update" on companies;
 create policy "companies_admin_update" on companies for update
   using (is_company_admin() and id = current_company_id())
   with check (is_company_admin() and id = current_company_id());
+
+-- Sólo el superadmin puede cambiar los módulos de una empresa (aunque el admin
+-- pueda renombrarla). Trigger de defensa: bloquea el cambio de "modules" si el
+-- que actualiza no es superadmin.
+create or replace function public.guard_company_modules()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if (new.modules is distinct from old.modules) and not is_superadmin() then
+    raise exception 'Sólo el superadmin puede cambiar los módulos de la empresa';
+  end if;
+  return new;
+end$$;
+drop trigger if exists companies_guard_modules on companies;
+create trigger companies_guard_modules before update on companies
+  for each row execute function public.guard_company_modules();
 
 -- Perfiles: cada quien lee el suyo; superadmin y admin (de su empresa) gestionan.
 drop policy if exists "profiles_read" on profiles;

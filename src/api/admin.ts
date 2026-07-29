@@ -47,6 +47,18 @@ export async function updateCompany(id: string, name: string): Promise<void> {
   if (error) throw error
 }
 
+/** Habilita/deshabilita módulos de una empresa (sólo superadmin, por RLS + trigger). */
+export async function updateCompanyModules(
+  id: string,
+  modules: string[]
+): Promise<void> {
+  const { error } = await supabase
+    .from('companies')
+    .update({ modules })
+    .eq('id', id)
+  if (error) throw error
+}
+
 export async function deleteCompany(id: string): Promise<void> {
   const { error } = await supabase.from('companies').delete().eq('id', id)
   if (error) throw error

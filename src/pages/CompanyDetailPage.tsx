@@ -1,15 +1,25 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
-import { getCompany } from '../api/admin'
+import { getCompany, updateCompanyModules } from '../api/admin'
+import { COMPANY_MODULES, MODULE_LABELS, type ModuleKey } from '../types/auth'
 import { CompanyUsers } from '../components/CompanyUsers'
-import { EmptyState, PageHeader, Spinner } from '../components/ui'
+import { Card, EmptyState, PageHeader, Spinner } from '../components/ui'
 
 export default function CompanyDetailPage() {
   const { id = '' } = useParams()
+  const qc = useQueryClient()
   const { data: company, isLoading } = useQuery({
     queryKey: ['company', id],
     queryFn: () => getCompany(id),
     enabled: Boolean(id),
+  })
+
+  const modulesMutation = useMutation({
+    mutationFn: (modules: string[]) => updateCompanyModules(id, modules),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['company', id] })
+      qc.invalidateQueries({ queryKey: ['companies'] })
+    },
   })
 
   if (isLoading) return <Spinner />
@@ -23,6 +33,19 @@ export default function CompanyDetailPage() {
       </EmptyState>
     )
 
+  // Si la empresa no trae lista (dato viejo), se asumen todos habilitados.
+  const enabled = new Set<ModuleKey>(
+    (company.modules as ModuleKey[] | undefined) ?? COMPANY_MODULES
+  )
+
+  function toggle(m: ModuleKey) {
+    const next = new Set(enabled)
+    if (next.has(m)) next.delete(m)
+    else next.add(m)
+    // Guardamos en el orden canónico.
+    modulesMutation.mutate(COMPANY_MODULES.filter((k) => next.has(k)))
+  }
+
   return (
     <div>
       <Link
@@ -31,7 +54,53 @@ export default function CompanyDetailPage() {
       >
         ← Volver a empresas
       </Link>
-      <PageHeader title={company.name} subtitle="Usuarios de esta empresa." />
+      <PageHeader title={company.name} subtitle="Módulos y usuarios de esta empresa." />
+
+      <Card className="mb-6 p-4">
+        <h2 className="mb-1 font-semibold text-slate-900">Módulos habilitados</h2>
+        <p className="mb-3 text-sm text-slate-500">
+          Activa o desactiva qué puede ver esta empresa. Los usuarios sólo verán
+          los módulos permitidos por su rol y habilitados aquí.
+        </p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {COMPANY_MODULES.map((m) => {
+            const on = enabled.has(m)
+            return (
+              <label
+                key={m}
+                className="flex cursor-pointer items-center justify-between rounded-lg border border-slate-200 px-3 py-2"
+              >
+                <span className="text-sm font-medium text-slate-700">
+                  {MODULE_LABELS[m]}
+                </span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={on}
+                  disabled={modulesMutation.isPending}
+                  onClick={() => toggle(m)}
+                  className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
+                    on ? 'bg-sky-600' : 'bg-slate-300'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+                      on ? 'translate-x-5' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </label>
+            )
+          })}
+        </div>
+        {modulesMutation.isError && (
+          <p className="mt-2 text-sm text-red-600">
+            Error al guardar: {(modulesMutation.error as Error).message}
+          </p>
+        )}
+      </Card>
+
+      <h2 className="mb-3 font-semibold text-slate-900">Usuarios</h2>
       <CompanyUsers companyId={company.id} />
     </div>
   )
