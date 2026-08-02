@@ -45,7 +45,7 @@ type StatusFilter = 'all' | OrderStatus
 
 const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
   { value: 'all', label: 'Todos' },
-  { value: 'ordered', label: 'Pedido' },
+  { value: 'ordered', label: 'Sin entregar' },
   { value: 'delivered', label: 'Entregado' },
 ]
 
@@ -80,6 +80,9 @@ export default function OrdersPage() {
   const [addressId, setAddressId] = useState('')
   const [notes, setNotes] = useState('')
   const [items, setItems] = useState<DraftItem[]>([])
+  // Pago al crear/editar el pedido.
+  const [formPaid, setFormPaid] = useState(false)
+  const [formMethod, setFormMethod] = useState<PaymentMethod | ''>('')
 
   // Registro rápido de cliente dentro del formulario de pedido.
   const emptyNewClient = { name: '', surname: '', phone: '', address: '', comuna: '' }
@@ -174,6 +177,8 @@ export default function OrdersPage() {
         address_id: addressId || null,
         notes,
         items: payload,
+        paid: formPaid,
+        payment_method: formPaid ? (formMethod as PaymentMethod) : null,
       }
       if (editingId) await updateOrder(editingId, input)
       else await createOrder(input)
@@ -228,6 +233,8 @@ export default function OrdersPage() {
     setAddressId('')
     setNotes('')
     setItems([{ product_id: '', quantity: 1 }])
+    setFormPaid(false)
+    setFormMethod('')
     setNewClientMode(false)
     setNewClient(emptyNewClient)
     setModalOpen(true)
@@ -246,6 +253,8 @@ export default function OrdersPage() {
           }))
         : [{ product_id: '', quantity: 1 }]
     )
+    setFormPaid(o.paid)
+    setFormMethod(o.payment_method ?? '')
     setNewClientMode(false)
     setNewClient(emptyNewClient)
     setModalOpen(true)
@@ -263,7 +272,8 @@ export default function OrdersPage() {
   }
 
   const validItems = items.filter((it) => it.product_id && it.quantity > 0)
-  const canSave = clientId && validItems.length > 0
+  const canSave =
+    clientId && validItems.length > 0 && (!formPaid || formMethod)
 
   return (
     <div>
@@ -312,10 +322,10 @@ export default function OrdersPage() {
               </div>
             </div>
 
-            <div className="mt-4 flex flex-wrap gap-x-8 gap-y-4">
-              <div>
+            <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:gap-6 sm:overflow-x-auto sm:pb-1">
+              <div className="shrink-0">
                 <Label>Estado</Label>
-                <div className="flex flex-wrap gap-1">
+                <div className="flex gap-1">
                   {STATUS_FILTERS.map((f) => (
                     <button
                       key={f.value}
@@ -336,9 +346,9 @@ export default function OrdersPage() {
                 </div>
               </div>
 
-              <div>
+              <div className="shrink-0">
                 <Label>Pago</Label>
-                <div className="flex flex-wrap gap-1">
+                <div className="flex gap-1">
                   {PAID_FILTERS.map((f) => (
                     <button
                       key={f.value}
@@ -359,9 +369,9 @@ export default function OrdersPage() {
                 </div>
               </div>
 
-              <div>
+              <div className="shrink-0">
                 <Label>Método</Label>
-                <div className="flex flex-wrap gap-1">
+                <div className="flex gap-1">
                   {(
                     [
                       { value: 'all', label: 'Todos' },
@@ -800,6 +810,47 @@ export default function OrdersPage() {
             />
           </div>
 
+          {/* Pago al crear el pedido (puede pagarse sin haber sido entregado). */}
+          <div className="rounded-lg border border-slate-200 p-3">
+            <label className="flex cursor-pointer items-center gap-3">
+              <input
+                type="checkbox"
+                checked={formPaid}
+                onChange={(e) => {
+                  setFormPaid(e.target.checked)
+                  if (!e.target.checked) setFormMethod('')
+                }}
+                className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+              />
+              <span className="text-sm font-medium text-slate-700">
+                Ya está pagado
+              </span>
+            </label>
+            {formPaid && (
+              <div className="mt-3">
+                <Label>Método de pago *</Label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['efectivo', 'transferencia', 'tarjeta'] as PaymentMethod[]).map(
+                    (m) => (
+                      <button
+                        type="button"
+                        key={m}
+                        onClick={() => setFormMethod(m)}
+                        className={`rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+                          formMethod === m
+                            ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
+                            : 'border-slate-300 text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        {PAYMENT_LABELS[m]}
+                      </button>
+                    )
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="flex items-center justify-between border-t border-slate-100 pt-3">
             <span className="text-sm text-slate-500">Total del pedido</span>
             <span className="text-xl font-bold text-slate-900">
@@ -899,7 +950,7 @@ function OrderRow({
         <OrderActions
           order={o}
           onChanged={onChanged}
-          className="flex items-center gap-1"
+          className="flex w-40 flex-col items-stretch gap-1"
         />
       </td>
       <td className="px-2 py-2">

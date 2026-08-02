@@ -70,7 +70,7 @@ function SidebarNav({
           onClick={onNavigate}
           className={({ isActive }) =>
             `flex w-full items-center rounded-lg font-medium transition-colors ${
-              big ? 'gap-3 px-4 py-3.5 text-lg' : 'gap-2 px-3 py-2 text-sm'
+              big ? 'gap-3 px-4 py-3.5 text-lg' : 'gap-2.5 px-3 py-2.5 text-base'
             } ${
               isActive
                 ? 'bg-sky-100 text-sky-700'
@@ -78,7 +78,7 @@ function SidebarNav({
             }`
           }
         >
-          <span className={big ? 'text-2xl' : ''}>{item.icon}</span>
+          <span className={big ? 'text-2xl' : 'text-lg'}>{item.icon}</span>
           {item.label}
         </NavLink>
       ))}
@@ -158,7 +158,7 @@ export default function App() {
   return (
     <div className="min-h-screen overflow-x-clip">
       <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/90 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3">
+        <div className="flex w-full items-center gap-3 px-4 py-3 sm:px-6 lg:px-8">
           {/* Abrir menú lateral en móvil */}
           <button
             type="button"
@@ -198,13 +198,13 @@ export default function App() {
         </div>
       </header>
 
-      <div className="mx-auto flex w-full max-w-6xl">
+      <div className="flex w-full">
         {/* Menú lateral en escritorio */}
         <aside className="hidden w-56 shrink-0 border-r border-slate-200 p-3 lg:block">
           <SidebarNav items={navItems} />
         </aside>
 
-        <main className="min-w-0 flex-1 px-4 py-8">
+        <main className="min-w-0 flex-1 px-4 py-8 sm:px-6 lg:px-8">
         <Routes>
           <Route path="/" element={<Navigate to={home} replace />} />
           <Route

@@ -46,7 +46,7 @@ type StatusFilter = 'all' | OrderStatus
 
 const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
   { value: 'all', label: 'Todos' },
-  { value: 'ordered', label: 'Pedido' },
+  { value: 'ordered', label: 'Sin entregar' },
   { value: 'delivered', label: 'Entregado' },
 ]
 
@@ -348,10 +348,10 @@ export default function OrdersReportPage() {
           </div>
         </div>
 
-        <div className="mt-4 flex flex-wrap gap-x-8 gap-y-4">
-          <div>
+        <div className="mt-4 flex gap-6 overflow-x-auto pb-1">
+          <div className="shrink-0">
             <Label>Estado</Label>
-            <div className="flex flex-wrap gap-1">
+            <div className="flex gap-1">
               {STATUS_FILTERS.map((f) => (
                 <button
                   key={f.value}
@@ -372,9 +372,9 @@ export default function OrdersReportPage() {
             </div>
           </div>
 
-          <div>
+          <div className="shrink-0">
             <Label>Pago</Label>
-            <div className="flex flex-wrap gap-1">
+            <div className="flex gap-1">
               {PAID_FILTERS.map((f) => (
                 <button
                   key={f.value}
@@ -395,9 +395,9 @@ export default function OrdersReportPage() {
             </div>
           </div>
 
-          <div>
+          <div className="shrink-0">
             <Label>Método</Label>
-            <div className="flex flex-wrap gap-1">
+            <div className="flex gap-1">
               {(
                 [
                   { value: 'all', label: 'Todos' },

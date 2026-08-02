@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
-import { getDeliverySummary, type DeliverySummaryRow } from '../api/deliveries'
+import { getDeliverySummary } from '../api/deliveries'
 import { listDrivers } from '../api/routes'
 import { listOrders } from '../api/orders'
 import { listCosts } from '../api/costs'
@@ -8,6 +8,7 @@ import { listProducts } from '../api/products'
 import { listSupplies } from '../api/supplies'
 import { useAuth } from '../lib/auth'
 import { formatMoney, toLocalDateStr } from '../lib/format'
+import { makeReportDoc, addReportTable, saveReport } from '../lib/reportPdf'
 import {
   Button,
   Card,
@@ -19,15 +20,8 @@ import {
   TextInput,
 } from '../components/ui'
 
-interface DriverGroup {
-  driver_id: string
-  name: string
-  rows: DeliverySummaryRow[]
-  total: number
-}
-
 export default function DeliveriesSummaryPage() {
-  const { profile } = useAuth()
+  const { profile, company } = useAuth()
   const isRepartidor = profile?.role === 'repartidor'
 
   const [driverId, setDriverId] = useState('')
@@ -64,15 +58,14 @@ export default function DeliveriesSummaryPage() {
     queryFn: listCosts,
     enabled: isRepartidor,
   })
+  // Productos e insumos: necesarios para la tabla de insumos, que ven todos.
   const { data: products } = useQuery({
     queryKey: ['products'],
     queryFn: listProducts,
-    enabled: isRepartidor,
   })
   const { data: supplies } = useQuery({
     queryKey: ['supplies'],
     queryFn: listSupplies,
-    enabled: isRepartidor,
   })
 
   const inRange = (dateStr: string) =>
@@ -129,19 +122,35 @@ export default function DeliveriesSummaryPage() {
     })).sort((a, b) => b.qty - a.qty)
   }, [data, products, supplies])
 
-  const groups: DriverGroup[] = useMemo(() => {
-    const m = new Map<string, DriverGroup>()
+  // Productos entregados agregados según el filtro (un solo repartidor o todos),
+  // sin separar por persona: se suma la misma referencia entre repartidores.
+  const productsSummary = useMemo(() => {
+    const totals = new Map<string, { name: string; qty: number }>()
     for (const r of data ?? []) {
-      let g = m.get(r.driver_id)
-      if (!g) {
-        g = { driver_id: r.driver_id, name: r.driver_name, rows: [], total: 0 }
-        m.set(r.driver_id, g)
-      }
-      g.rows.push(r)
-      g.total += Number(r.total_quantity)
+      const cur = totals.get(r.product_id)
+      if (cur) cur.qty += Number(r.total_quantity)
+      else
+        totals.set(r.product_id, {
+          name: r.product_name,
+          qty: Number(r.total_quantity),
+        })
     }
-    return Array.from(m.values())
+    return Array.from(totals.values()).sort((a, b) => b.qty - a.qty)
   }, [data])
+
+  const totalUnits = useMemo(
+    () => productsSummary.reduce((s, p) => s + p.qty, 0),
+    [productsSummary]
+  )
+
+  // Nombre que se muestra sobre las tablas: el repartidor filtrado o "Todos".
+  const filterLabel = isRepartidor
+    ? profile?.full_name || profile?.email || 'Mis entregas'
+    : driverId
+      ? drivers?.find((d) => d.id === driverId)?.full_name ||
+        drivers?.find((d) => d.id === driverId)?.email ||
+        'Sin nombre'
+      : 'Todos los repartidores'
 
   const hasFilters = Boolean(driverId || fromDate || toDate)
 
@@ -151,28 +160,37 @@ export default function DeliveriesSummaryPage() {
     setToDate('')
   }
 
-  function exportCsv() {
+  function exportPdf() {
     if (!data || data.length === 0) return
-    const headers = ['Repartidor', 'Producto', 'Cantidad']
-    const esc = (v: string) => `"${String(v).replace(/"/g, '""')}"`
-    const lines = [
-      headers,
-      ...data.map((r) => [
-        r.driver_name,
-        r.product_name,
-        String(Number(r.total_quantity)),
-      ]),
-    ].map((row) => row.map(esc).join(','))
-    const csv = '﻿' + lines.join('\r\n')
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'resumen-entregas.csv'
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+    const parts: string[] = [filterLabel]
+    if (fromDate || toDate) {
+      parts.push(`Rango ${fromDate || '…'} a ${toDate || '…'}`)
+    }
+    parts.push(`Generado ${new Date().toLocaleDateString('es-CL')}`)
+
+    const r = makeReportDoc(
+      'Resumen de entregas',
+      company?.name,
+      parts.join(' · ')
+    )
+
+    if (suppliesSummary.length) {
+      addReportTable(
+        r,
+        ['Insumo', 'Cantidad entregada'],
+        suppliesSummary.map((s) => [s.name, s.qty]),
+        { title: 'Insumos entregados' }
+      )
+    }
+
+    addReportTable(
+      r,
+      ['Producto', 'Cantidad entregada'],
+      productsSummary.map((p) => [p.name, p.qty]),
+      { title: `Productos entregados (${totalUnits} u.)` }
+    )
+
+    saveReport(r, 'resumen-entregas.pdf')
   }
 
   return (
@@ -186,8 +204,8 @@ export default function DeliveriesSummaryPage() {
         }
         action={
           data && data.length > 0 ? (
-            <Button variant="secondary" onClick={exportCsv}>
-              ⬇ Descargar CSV
+            <Button variant="secondary" onClick={exportPdf}>
+              ⬇ Descargar PDF
             </Button>
           ) : undefined
         }
@@ -289,41 +307,6 @@ export default function DeliveriesSummaryPage() {
               </p>
             </div>
           </div>
-
-          <Card className="overflow-hidden">
-            <div className="border-b border-slate-100 bg-slate-50 px-4 py-3 font-semibold text-slate-900">
-              🛒 Insumos entregados
-            </div>
-            {suppliesSummary.length === 0 ? (
-              <p className="px-4 py-3 text-sm text-slate-500">
-                Sin insumos en el período.
-              </p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
-                      <th className="px-4 py-2">Insumo</th>
-                      <th className="px-4 py-2 text-right">Cantidad entregada</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {suppliesSummary.map((s) => (
-                      <tr
-                        key={s.name}
-                        className="border-b border-slate-100 last:border-0"
-                      >
-                        <td className="px-4 py-2 text-slate-800">{s.name}</td>
-                        <td className="px-4 py-2 text-right font-medium tabular-nums text-slate-900">
-                          {s.qty}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </Card>
         </div>
       )}
 
@@ -333,49 +316,82 @@ export default function DeliveriesSummaryPage() {
         <Card className="border-red-200 bg-red-50 p-4 text-sm text-red-700">
           No se pudo cargar el resumen: {(error as Error).message}
         </Card>
-      ) : groups.length === 0 ? (
+      ) : !data || data.length === 0 ? (
         <EmptyState>No hay entregas con esos filtros.</EmptyState>
       ) : (
-        <div className="grid gap-4">
-          {groups.map((g) => (
-            <Card key={g.driver_id} className="overflow-hidden">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-4 py-3">
-                <span className="font-semibold text-slate-900">
-                  {isRepartidor ? '📦 Productos entregados' : `🚚 ${g.name}`}
-                </span>
-                <span className="text-sm text-slate-500">
-                  {g.total} {g.total === 1 ? 'unidad' : 'unidades'} en total
-                </span>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
-                      <th className="px-4 py-2">Producto</th>
-                      <th className="px-4 py-2 text-right">Cantidad entregada</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {g.rows.map((r) => (
-                      <tr
-                        key={r.product_id}
-                        className="border-b border-slate-100 last:border-0"
-                      >
-                        <td className="px-4 py-2 text-slate-800">
-                          {r.product_name}
-                        </td>
-                        <td className="px-4 py-2 text-right font-medium tabular-nums text-slate-900">
-                          {Number(r.total_quantity)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
-          ))}
+        <div>
+          {/* Encabezado: a quién corresponden las tablas de abajo. */}
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-900">
+              🚚 {filterLabel}
+            </h2>
+            <span className="text-sm text-slate-500">
+              {totalUnits} {totalUnits === 1 ? 'unidad' : 'unidades'} en total
+            </span>
+          </div>
+
+          <div className="grid items-start gap-4 lg:grid-cols-2">
+            <SummaryCard
+              title="🛒 Insumos entregados"
+              colLabel="Insumo"
+              rows={suppliesSummary}
+            />
+            <SummaryCard
+              title="📦 Productos entregados"
+              colLabel="Producto"
+              rows={productsSummary}
+            />
+          </div>
         </div>
       )}
     </div>
+  )
+}
+
+/** Tabla resumen (insumos o productos) con encabezado y una columna de cantidad. */
+function SummaryCard({
+  title,
+  colLabel,
+  rows,
+}: {
+  title: string
+  colLabel: string
+  rows: { name: string; qty: number }[]
+}) {
+  return (
+    <Card className="overflow-hidden">
+      <div className="border-b border-slate-100 bg-slate-50 px-4 py-3 font-semibold text-slate-900">
+        {title}
+      </div>
+      {rows.length === 0 ? (
+        <p className="px-4 py-3 text-sm text-slate-500">
+          Sin registros en el período.
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-500">
+                <th className="px-4 py-2">{colLabel}</th>
+                <th className="px-4 py-2 text-right">Cantidad entregada</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((s) => (
+                <tr
+                  key={s.name}
+                  className="border-b border-slate-100 last:border-0"
+                >
+                  <td className="px-4 py-2 text-slate-800">{s.name}</td>
+                  <td className="px-4 py-2 text-right font-medium tabular-nums text-slate-900">
+                    {s.qty}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
   )
 }

@@ -12,6 +12,9 @@ export interface OrderInput {
   address_id: string | null
   notes: string
   items: OrderItemInput[]
+  // Pago al crear/editar (opcional). Si paid, se guarda método y monto = total.
+  paid?: boolean
+  payment_method?: PaymentMethod | null
 }
 
 export async function listOrders(): Promise<OrderDetail[]> {
@@ -61,6 +64,7 @@ export async function createOrder(input: OrderInput): Promise<string> {
     0
   )
 
+  const paid = Boolean(input.paid)
   const { data: order, error } = await supabase
     .from('orders')
     .insert({
@@ -69,6 +73,9 @@ export async function createOrder(input: OrderInput): Promise<string> {
       notes: input.notes || null,
       status: 'ordered',
       total,
+      paid,
+      payment_method: input.payment_method ?? null,
+      paid_amount: paid ? total : null,
     })
     .select()
     .single()
@@ -99,6 +106,7 @@ export async function updateOrder(
     0
   )
 
+  const paid = Boolean(input.paid)
   const { error } = await supabase
     .from('orders')
     .update({
@@ -106,6 +114,9 @@ export async function updateOrder(
       address_id: input.address_id,
       notes: input.notes || null,
       total,
+      paid,
+      payment_method: input.payment_method ?? null,
+      paid_amount: paid ? total : null,
     })
     .eq('id', id)
   if (error) throw error

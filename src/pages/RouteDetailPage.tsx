@@ -991,7 +991,7 @@ function StopCells({
           <OrderActions
             order={order}
             onChanged={onChanged}
-            className="flex items-center gap-1"
+            className="flex w-40 flex-col items-stretch gap-1"
           />
         )}
       </td>

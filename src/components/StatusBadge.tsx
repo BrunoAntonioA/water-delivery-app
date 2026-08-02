@@ -1,7 +1,7 @@
 import type { OrderStatus, PaymentMethod } from '../types/db'
 
 export const STATUS_LABELS: Record<OrderStatus, string> = {
-  ordered: 'Pedido',
+  ordered: 'Sin entregar',
   delivered: 'Entregado',
 }
 
@@ -35,7 +35,7 @@ export function PaidBadge({ paid }: { paid: boolean }) {
         paid ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'
       }`}
     >
-      {paid ? 'Pagado' : 'Pendiente'}
+      {paid ? 'Pagado' : 'Pendiente de pago'}
     </span>
   )
 }
