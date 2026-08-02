@@ -1,5 +1,11 @@
 import { supabase } from '../lib/supabase'
-import type { OrderDetail, PaymentMethod } from '../types/db'
+import type { OrderDetail, OrderPayment, PaymentMethod } from '../types/db'
+
+// Redondea a 2 decimales (evita errores de punto flotante al sumar montos).
+const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
+
+const paymentsTotal = (payments: OrderPayment[]) =>
+  round2(payments.reduce((sum, p) => sum + Number(p.amount), 0))
 
 export interface OrderItemInput {
   product_id: string
@@ -76,6 +82,10 @@ export async function createOrder(input: OrderInput): Promise<string> {
       paid,
       payment_method: input.payment_method ?? null,
       paid_amount: paid ? total : null,
+      payments:
+        paid && input.payment_method
+          ? [{ method: input.payment_method, amount: total }]
+          : null,
     })
     .select()
     .single()
@@ -117,6 +127,10 @@ export async function updateOrder(
       paid,
       payment_method: input.payment_method ?? null,
       paid_amount: paid ? total : null,
+      payments:
+        paid && input.payment_method
+          ? [{ method: input.payment_method, amount: total }]
+          : null,
     })
     .eq('id', id)
   if (error) throw error
@@ -142,22 +156,24 @@ export async function updateOrder(
 
 /**
  * Marca el pedido como ENTREGADO, guardando los bidones devueltos y el método de
- * pago acordado. Opcionalmente lo marca pagado en el mismo paso (paidAmount).
+ * pago acordado. Opcionalmente lo marca pagado en el mismo paso (payments).
  */
 export async function markOrderDelivered(
   id: string,
   returnedBidones: number,
   paymentMethod: PaymentMethod,
-  paidAmount?: number | null
+  payments?: OrderPayment[] | null
 ): Promise<void> {
   const patch: Record<string, unknown> = {
     status: 'delivered',
     returned_bidones: returnedBidones,
-    payment_method: paymentMethod,
+    // Método acordado (o principal si ya pagó con el desglose).
+    payment_method: payments?.length ? payments[0].method : paymentMethod,
   }
-  if (paidAmount != null) {
+  if (payments?.length) {
     patch.paid = true
-    patch.paid_amount = paidAmount
+    patch.paid_amount = paymentsTotal(payments)
+    patch.payments = payments
   }
   const { error } = await supabase.from('orders').update(patch).eq('id', id)
   if (error) throw error
@@ -172,24 +188,31 @@ export async function undeliverOrder(id: string): Promise<void> {
   if (error) throw error
 }
 
-/** Marca el pedido como PAGADO (independiente de la entrega). */
+/**
+ * Marca el pedido como PAGADO (independiente de la entrega). `payments` lleva
+ * uno o dos tramos (método + monto); la suma debe ser igual al total del pedido.
+ */
 export async function markOrderPaid(
   id: string,
-  paymentMethod: PaymentMethod,
-  paidAmount: number
+  payments: OrderPayment[]
 ): Promise<void> {
   const { error } = await supabase
     .from('orders')
-    .update({ paid: true, payment_method: paymentMethod, paid_amount: paidAmount })
+    .update({
+      paid: true,
+      payment_method: payments[0]?.method ?? null,
+      paid_amount: paymentsTotal(payments),
+      payments,
+    })
     .eq('id', id)
   if (error) throw error
 }
 
-/** Deshace el pago: paid=false y limpia el monto (conserva el método acordado). */
+/** Deshace el pago: paid=false y limpia monto y desglose (conserva el método). */
 export async function unmarkOrderPaid(id: string): Promise<void> {
   const { error } = await supabase
     .from('orders')
-    .update({ paid: false, paid_amount: null })
+    .update({ paid: false, paid_amount: null, payments: null })
     .eq('id', id)
   if (error) throw error
 }

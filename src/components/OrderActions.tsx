@@ -6,7 +6,12 @@ import {
   undeliverOrder,
   unmarkOrderPaid,
 } from '../api/orders'
-import type { OrderDetail, PaymentMethod, WhatsappTemplate } from '../types/db'
+import type {
+  OrderDetail,
+  OrderPayment,
+  PaymentMethod,
+  WhatsappTemplate,
+} from '../types/db'
 import { useAuth } from '../lib/auth'
 import { formatMoney } from '../lib/format'
 import { orderClientName } from '../lib/order'
@@ -51,6 +56,10 @@ export function OrderActions({
   const [alsoPaid, setAlsoPaid] = useState(false)
   const [payMethod, setPayMethod] = useState<PaymentMethod | ''>('')
   const [payAmount, setPayAmount] = useState('')
+  // Segundo método (pago dividido).
+  const [splitPay, setSplitPay] = useState(false)
+  const [payMethod2, setPayMethod2] = useState<PaymentMethod | ''>('')
+  const [payAmount2, setPayAmount2] = useState('')
   const [returned, setReturned] = useState('0')
   const [chargeOpen, setChargeOpen] = useState(false)
 
@@ -61,12 +70,12 @@ export function OrderActions({
     mutationFn: ({
       returnedBidones,
       method,
-      paidAmount,
+      payments,
     }: {
       returnedBidones: number
       method: PaymentMethod
-      paidAmount?: number | null
-    }) => markOrderDelivered(order.id, returnedBidones, method, paidAmount),
+      payments?: OrderPayment[] | null
+    }) => markOrderDelivered(order.id, returnedBidones, method, payments),
     onSuccess: () => {
       onChanged()
       setDeliverOpen(false)
@@ -74,8 +83,7 @@ export function OrderActions({
   })
 
   const payMutation = useMutation({
-    mutationFn: ({ method, amount }: { method: PaymentMethod; amount: number }) =>
-      markOrderPaid(order.id, method, amount),
+    mutationFn: (payments: OrderPayment[]) => markOrderPaid(order.id, payments),
     onSuccess: () => {
       onChanged()
       setPayOpen(false)
@@ -100,17 +108,52 @@ export function OrderActions({
     undeliverMutation.isPending ||
     unpayMutation.isPending
   const canCharge = !order.paid
+  const total = order.total
+
+  // Pago con un solo método: el monto debe ser igual al total.
   const amountMatches =
-    payAmount.trim() !== '' && round2(Number(payAmount)) === round2(order.total)
-  const canConfirmPayment = Boolean(payMethod) && amountMatches
+    payAmount.trim() !== '' && round2(Number(payAmount)) === round2(total)
+  // Pago dividido: dos métodos distintos, montos > 0 y suma igual al total.
+  const splitSum = round2((Number(payAmount) || 0) + (Number(payAmount2) || 0))
+  const splitValid =
+    Boolean(payMethod) &&
+    Boolean(payMethod2) &&
+    payMethod !== payMethod2 &&
+    payAmount.trim() !== '' &&
+    payAmount2.trim() !== '' &&
+    Number(payAmount) > 0 &&
+    Number(payAmount2) > 0 &&
+    splitSum === round2(total)
+  // ¿El pago (uno o dos métodos) está listo para confirmar?
+  const paymentReady = splitPay
+    ? splitValid
+    : Boolean(payMethod) && amountMatches
+
   const returnedValid =
     returned.trim() !== '' &&
     Number.isInteger(Number(returned)) &&
     Number(returned) >= 0
 
+  /** Arma el desglose de pago a partir del estado del formulario. */
+  function buildPayments(): OrderPayment[] {
+    if (splitPay) {
+      return [
+        { method: payMethod as PaymentMethod, amount: round2(Number(payAmount)) },
+        {
+          method: payMethod2 as PaymentMethod,
+          amount: round2(Number(payAmount2)),
+        },
+      ]
+    }
+    return [{ method: payMethod as PaymentMethod, amount: round2(total) }]
+  }
+
   function resetPayFields() {
     setPayMethod('')
     setPayAmount('')
+    setSplitPay(false)
+    setPayMethod2('')
+    setPayAmount2('')
   }
 
   function openDeliver() {
@@ -122,8 +165,8 @@ export function OrderActions({
 
   function openPay() {
     // El método suele venir del momento de la entrega; lo prellenamos.
+    resetPayFields()
     setPayMethod(order.payment_method ?? '')
-    setPayAmount('')
     setPayOpen(true)
   }
 
@@ -186,11 +229,11 @@ export function OrderActions({
             if (!returnedValid || !payMethod) return
             const returnedBidones = Number(returned)
             if (alsoPaid) {
-              if (!amountMatches) return
+              if (!paymentReady) return
               deliverMutation.mutate({
                 returnedBidones,
                 method: payMethod,
-                paidAmount: round2(Number(payAmount)),
+                payments: buildPayments(),
               })
             } else {
               deliverMutation.mutate({ returnedBidones, method: payMethod })
@@ -217,7 +260,11 @@ export function OrderActions({
             )}
           </div>
 
-          <MethodSelector method={payMethod} setMethod={setPayMethod} />
+          <MethodSelector
+            method={payMethod}
+            setMethod={setPayMethod}
+            label={splitPay ? 'Método del pago 1 *' : 'Método de pago *'}
+          />
 
           <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-200 px-4 py-3">
             <input
@@ -225,7 +272,12 @@ export function OrderActions({
               checked={alsoPaid}
               onChange={(e) => {
                 setAlsoPaid(e.target.checked)
-                if (!e.target.checked) setPayAmount('')
+                if (!e.target.checked) {
+                  setPayAmount('')
+                  setSplitPay(false)
+                  setPayMethod2('')
+                  setPayAmount2('')
+                }
               }}
               className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
             />
@@ -235,11 +287,19 @@ export function OrderActions({
           </label>
 
           {alsoPaid && (
-            <AmountField
+            <SplitPaymentSection
+              total={total}
               amount={payAmount}
               setAmount={setPayAmount}
-              total={order.total}
               amountMatches={amountMatches}
+              split={splitPay}
+              setSplit={setSplitPay}
+              method2={payMethod2}
+              setMethod2={setPayMethod2}
+              amount2={payAmount2}
+              setAmount2={setPayAmount2}
+              splitSum={splitSum}
+              method1={payMethod}
             />
           )}
 
@@ -260,10 +320,7 @@ export function OrderActions({
             <Button
               type="submit"
               disabled={
-                busy ||
-                !returnedValid ||
-                !payMethod ||
-                (alsoPaid && !amountMatches)
+                busy || !returnedValid || !payMethod || (alsoPaid && !paymentReady)
               }
             >
               {busy
@@ -281,23 +338,32 @@ export function OrderActions({
         <form
           onSubmit={(e) => {
             e.preventDefault()
-            if (!canConfirmPayment) return
-            payMutation.mutate({
-              method: payMethod as PaymentMethod,
-              amount: round2(Number(payAmount)),
-            })
+            if (!paymentReady) return
+            payMutation.mutate(buildPayments())
           }}
           className="space-y-4"
         >
           <OrderSummary order={order} />
 
-          <PaymentFields
+          <MethodSelector
             method={payMethod}
             setMethod={setPayMethod}
+            label={splitPay ? 'Método del pago 1 *' : 'Método de pago *'}
+          />
+
+          <SplitPaymentSection
+            total={total}
             amount={payAmount}
             setAmount={setPayAmount}
-            total={order.total}
             amountMatches={amountMatches}
+            split={splitPay}
+            setSplit={setSplitPay}
+            method2={payMethod2}
+            setMethod2={setPayMethod2}
+            amount2={payAmount2}
+            setAmount2={setPayAmount2}
+            splitSum={splitSum}
+            method1={payMethod}
           />
 
           {payMutation.isError && (
@@ -317,7 +383,7 @@ export function OrderActions({
             <Button
               type="submit"
               variant="success"
-              disabled={!canConfirmPayment || payMutation.isPending}
+              disabled={!paymentReady || payMutation.isPending}
             >
               {payMutation.isPending ? 'Guardando…' : 'Confirmar pago'}
             </Button>
@@ -357,13 +423,15 @@ function OrderSummary({ order }: { order: OrderDetail }) {
 function MethodSelector({
   method,
   setMethod,
+  label = 'Método de pago *',
 }: {
   method: PaymentMethod | ''
   setMethod: (m: PaymentMethod) => void
+  label?: string
 }) {
   return (
     <div>
-      <Label>Método de pago *</Label>
+      <Label>{label}</Label>
       <div className="grid grid-cols-3 gap-2">
         {(['efectivo', 'transferencia', 'tarjeta'] as PaymentMethod[]).map(
           (m) => (
@@ -385,55 +453,134 @@ function MethodSelector({
   )
 }
 
-function AmountField({
+function MoneyField({
+  label,
   amount,
   setAmount,
-  total,
-  amountMatches,
+  placeholder,
 }: {
+  label: string
   amount: string
   setAmount: (v: string) => void
-  total: number
-  amountMatches: boolean
+  placeholder?: string
 }) {
   return (
     <div>
-      <Label>Monto recibido *</Label>
+      <Label>{label}</Label>
       <TextInput
         type="number"
         min="0"
         step="0.01"
         value={amount}
         onChange={(e) => setAmount(e.target.value)}
-        placeholder={String(total)}
+        placeholder={placeholder}
       />
-      {amount.trim() !== '' && !amountMatches && (
-        <p className="mt-1 text-sm text-red-600">
-          El monto debe ser igual al total del pedido ({formatMoney(total)}).
-        </p>
-      )}
     </div>
   )
 }
 
-function PaymentFields(props: {
-  method: PaymentMethod | ''
-  setMethod: (m: PaymentMethod) => void
+/**
+ * Monto(s) del pago. Con un método, el monto debe igualar el total. Al activar
+ * "Pagó con dos métodos" aparece un segundo método+monto y la suma debe dar el
+ * total del pedido.
+ */
+function SplitPaymentSection({
+  total,
+  amount,
+  setAmount,
+  amountMatches,
+  split,
+  setSplit,
+  method1,
+  method2,
+  setMethod2,
+  amount2,
+  setAmount2,
+  splitSum,
+}: {
+  total: number
   amount: string
   setAmount: (v: string) => void
-  total: number
   amountMatches: boolean
+  split: boolean
+  setSplit: (b: boolean) => void
+  method1: PaymentMethod | ''
+  method2: PaymentMethod | ''
+  setMethod2: (m: PaymentMethod) => void
+  amount2: string
+  setAmount2: (v: string) => void
+  splitSum: number
 }) {
+  const sumMatches = round2(splitSum) === round2(total)
+  const sameMethod = split && Boolean(method2) && method1 === method2
   return (
-    <>
-      <MethodSelector method={props.method} setMethod={props.setMethod} />
-      <AmountField
-        amount={props.amount}
-        setAmount={props.setAmount}
-        total={props.total}
-        amountMatches={props.amountMatches}
+    <div className="space-y-3">
+      <MoneyField
+        label={split ? 'Monto del pago 1 *' : 'Monto recibido *'}
+        amount={amount}
+        setAmount={setAmount}
+        placeholder={String(total)}
       />
-    </>
+      {!split && amount.trim() !== '' && !amountMatches && (
+        <p className="-mt-1 text-sm text-red-600">
+          El monto debe ser igual al total del pedido ({formatMoney(total)}).
+        </p>
+      )}
+
+      {split ? (
+        <div className="space-y-3 rounded-lg border border-slate-200 p-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-semibold text-slate-700">Pago 2</span>
+            <button
+              type="button"
+              onClick={() => {
+                setSplit(false)
+                setMethod2('' as PaymentMethod)
+                setAmount2('')
+              }}
+              className="text-sm font-medium text-red-600 hover:text-red-700"
+            >
+              Quitar
+            </button>
+          </div>
+          <MethodSelector
+            method={method2}
+            setMethod={setMethod2}
+            label="Método del pago 2 *"
+          />
+          <MoneyField
+            label="Monto del pago 2 *"
+            amount={amount2}
+            setAmount={setAmount2}
+          />
+          {sameMethod && (
+            <p className="text-sm text-red-600">
+              Usa un método distinto al del pago 1.
+            </p>
+          )}
+          <div
+            className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm ${
+              sumMatches
+                ? 'bg-emerald-50 text-emerald-700'
+                : 'bg-amber-50 text-amber-700'
+            }`}
+          >
+            <span>Suma de los pagos</span>
+            <span className="font-semibold tabular-nums">
+              {formatMoney(splitSum)} / {formatMoney(total)}
+            </span>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setSplit(true)}
+          className="text-sm font-medium text-sky-600 hover:text-sky-700"
+        >
+          + Pagó con dos métodos
+        </button>
+      )}
+    </div>
   )
 }
 

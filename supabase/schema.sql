@@ -141,8 +141,9 @@ create table if not exists orders (
   address_id     uuid references addresses (id) on delete set null,
   status         order_status not null default 'ordered',
   total          numeric(12, 2) not null default 0 check (total >= 0),
-  payment_method payment_method,                 -- se llena al marcar como pagado
-  paid_amount    numeric(12, 2),                 -- monto recibido al pagar
+  payment_method payment_method,                 -- método principal (o único) del pago
+  paid_amount    numeric(12, 2),                 -- monto total recibido (= total del pedido)
+  payments       jsonb,                          -- desglose [{ "method": ..., "amount": ... }]
   notes          text,
   created_at     timestamptz not null default now()
 );
@@ -152,6 +153,9 @@ create index if not exists orders_status_idx on orders (status);
 -- Migración para bases de datos que ya tenían la tabla "orders" sin estas columnas.
 alter table orders add column if not exists payment_method payment_method;
 alter table orders add column if not exists paid_amount numeric(12, 2);
+-- Pago dividido: hasta dos métodos por pedido. Lista JSON de { method, amount }
+-- cuya suma es el total del pedido. paid_amount conserva el total pagado.
+alter table orders add column if not exists payments jsonb;
 -- Venta rápida: pedido con sólo un nombre (sin cliente registrado).
 alter table orders add column if not exists customer_name text;
 alter table orders alter column client_id drop not null;

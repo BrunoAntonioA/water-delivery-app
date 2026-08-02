@@ -21,7 +21,7 @@ import type {
   Supply,
 } from '../types/db'
 import { formatDate, formatMoney, toLocalDateStr } from '../lib/format'
-import { orderClientName } from '../lib/order'
+import { orderClientName, orderPaymentList, paidWithMethod } from '../lib/order'
 import { ClientCombobox } from '../components/ClientCombobox'
 import {
   PAYMENT_LABELS,
@@ -206,8 +206,10 @@ export default function OrdersReportPage() {
           .join('; '),
         formatMoney(o.total),
         STATUS_LABELS[o.status],
-        o.paid && o.payment_method
-          ? PAYMENT_LABELS[o.payment_method]
+        o.paid
+          ? orderPaymentList(o)
+              .map((p) => PAYMENT_LABELS[p.method])
+              .join(' + ')
           : '',
       ])
     )
@@ -495,8 +497,10 @@ export default function OrdersReportPage() {
                           <StatusBadge status={o.status} />
                         </td>
                         <td className="whitespace-nowrap px-3 py-2 text-slate-600">
-                          {o.paid && o.payment_method
-                            ? PAYMENT_LABELS[o.payment_method]
+                          {o.paid
+                            ? orderPaymentList(o)
+                                .map((p) => PAYMENT_LABELS[p.method])
+                                .join(' + ')
                             : '—'}
                         </td>
                       </tr>
@@ -546,11 +550,14 @@ function CashFlowTab({
       const date = toLocalDateStr(o.created_at)
       if (fromDate && date < fromDate) continue
       if (toDate && date > toDate) continue
-      const amt = Number(o.paid_amount ?? o.total)
-      if (o.payment_method === 'efectivo') efectivo += amt
-      else if (o.payment_method === 'transferencia') transferencia += amt
-      else if (o.payment_method === 'tarjeta') tarjeta += amt
-      else otros += amt
+      const e = paidWithMethod(o, 'efectivo')
+      const t = paidWithMethod(o, 'transferencia')
+      const k = paidWithMethod(o, 'tarjeta')
+      efectivo += e
+      transferencia += t
+      tarjeta += k
+      // Cualquier remanente sin método (pedidos antiguos) va a "otros".
+      otros += Math.max(0, Number(o.paid_amount ?? o.total) - (e + t + k))
     }
     return {
       efectivo,
@@ -629,9 +636,10 @@ function CashFlowTab({
       const date = toLocalDateStr(o.created_at)
       if (fromDate && date < fromDate) continue
       if (toDate && date > toDate) continue
-      const metodo = o.payment_method
-        ? PAYMENT_LABELS[o.payment_method]
-        : 'Sin método'
+      const metodo =
+        orderPaymentList(o)
+          .map((p) => PAYMENT_LABELS[p.method])
+          .join(' + ') || 'Sin método'
       movimientos.push({
         date,
         tipo: 'Ingreso',
@@ -920,9 +928,7 @@ function RepartidoresTab({
       const date = toLocalDateStr(o.created_at)
       if (fromDate && date < fromDate) continue
       if (toDate && date > toDate) continue
-      if (o.paid && o.payment_method === 'efectivo') {
-        efectivo += Number(o.paid_amount ?? o.total)
-      }
+      efectivo += paidWithMethod(o, 'efectivo')
       if (o.status === 'delivered') {
         for (const it of o.items) {
           const cur = productQty.get(it.product_id) ?? {

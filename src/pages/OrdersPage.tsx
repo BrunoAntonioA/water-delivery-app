@@ -12,7 +12,11 @@ import { listProducts } from '../api/products'
 import type { OrderDetail, OrderStatus, PaymentMethod } from '../types/db'
 import { formatDate, formatMoney, toLocalDateStr } from '../lib/format'
 import { useIsMobile } from '../lib/useIsMobile'
-import { orderClientName, returnedBidonesText } from '../lib/order'
+import {
+  orderClientName,
+  orderPaymentList,
+  returnedBidonesText,
+} from '../lib/order'
 import { OrderItemsList } from '../components/OrderItems'
 import { ClientCombobox } from '../components/ClientCombobox'
 import { Modal } from '../components/Modal'
@@ -520,12 +524,15 @@ export default function OrdersPage() {
                       ↩ {o.returned_bidones} bidones devueltos
                     </p>
                   )}
-                  {o.paid && o.payment_method ? (
+                  {o.paid ? (
                     <p className="mt-1 text-sm text-emerald-700">
-                      ✓ Pagado con {PAYMENT_LABELS[o.payment_method]}
-                      {o.paid_amount != null
-                        ? ` — ${formatMoney(o.paid_amount)}`
-                        : ''}
+                      ✓ Pagado:{' '}
+                      {orderPaymentList(o)
+                        .map(
+                          (p) =>
+                            `${PAYMENT_LABELS[p.method]} ${formatMoney(p.amount)}`
+                        )
+                        .join(' + ')}
                     </p>
                   ) : (
                     o.payment_method && (
@@ -941,7 +948,9 @@ function OrderRow({
         </div>
       </td>
       <td className="px-3 py-2 text-slate-700">
-        {o.payment_method ? PAYMENT_LABELS[o.payment_method] : '—'}
+        {orderPaymentList(o)
+          .map((p) => PAYMENT_LABELS[p.method])
+          .join(' + ') || '—'}
       </td>
       <td className="px-3 py-2 text-center tabular-nums text-slate-700">
         {returnedBidonesText(o)}

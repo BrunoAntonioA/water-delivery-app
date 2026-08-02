@@ -3,6 +3,12 @@ export type OrderStatus = 'ordered' | 'delivered'
 
 export type PaymentMethod = 'transferencia' | 'efectivo' | 'tarjeta'
 
+/** Un tramo de pago: un método y el monto pagado con ese método. */
+export interface OrderPayment {
+  method: PaymentMethod
+  amount: number
+}
+
 export interface Client {
   id: string
   name: string
@@ -83,6 +89,9 @@ export interface Order {
   total: number
   payment_method: PaymentMethod | null
   paid_amount: number | null
+  // Desglose del pago: 1 elemento (método único) o 2 (pago dividido). La suma de
+  // los montos es igual al total del pedido. Null en pedidos sin pago o antiguos.
+  payments: OrderPayment[] | null
   returned_bidones: number | null
   notes: string | null
   created_at: string

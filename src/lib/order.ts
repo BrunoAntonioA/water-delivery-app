@@ -1,4 +1,42 @@
-import type { Client, OrderStatus } from '../types/db'
+import type {
+  Client,
+  OrderPayment,
+  OrderStatus,
+  PaymentMethod,
+} from '../types/db'
+
+type PaymentSource = {
+  payments: OrderPayment[] | null
+  payment_method: PaymentMethod | null
+  paid_amount: number | null
+  total: number
+}
+
+/**
+ * Desglose de pago normalizado. Usa `payments` cuando existe; para pedidos
+ * antiguos (sin desglose) reconstruye un único tramo con el método y el monto
+ * guardados. Devuelve [] si no hay método de pago.
+ */
+export function orderPaymentList(order: PaymentSource): OrderPayment[] {
+  if (order.payments && order.payments.length > 0) return order.payments
+  if (order.payment_method) {
+    return [
+      { method: order.payment_method, amount: order.paid_amount ?? order.total },
+    ]
+  }
+  return []
+}
+
+/** Monto pagado con un método específico (0 si el pedido no está pagado). */
+export function paidWithMethod(
+  order: PaymentSource & { paid: boolean },
+  method: PaymentMethod
+): number {
+  if (!order.paid) return 0
+  return orderPaymentList(order)
+    .filter((p) => p.method === method)
+    .reduce((sum, p) => sum + Number(p.amount), 0)
+}
 
 /**
  * Texto de los bidones devueltos por el cliente en la entrega. Sólo aplica una

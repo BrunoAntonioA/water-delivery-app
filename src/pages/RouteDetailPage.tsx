@@ -37,7 +37,11 @@ import type { OrderDetail, RouteStopWithOrder } from '../types/db'
 import { useAuth } from '../lib/auth'
 import { useIsMobile } from '../lib/useIsMobile'
 import { formatDateOnly, formatMoney } from '../lib/format'
-import { orderClientName, returnedBidonesText } from '../lib/order'
+import {
+  orderClientName,
+  orderPaymentList,
+  returnedBidonesText,
+} from '../lib/order'
 import { OrderItemsList } from '../components/OrderItems'
 import { Modal } from '../components/Modal'
 import { OrderActions } from '../components/OrderActions'
@@ -978,7 +982,11 @@ function StopCells({
       </td>
       {showReturned && (
         <td className="px-3 py-2 text-slate-700">
-          {order?.payment_method ? PAYMENT_LABELS[order.payment_method] : '—'}
+          {order
+            ? orderPaymentList(order)
+                .map((p) => PAYMENT_LABELS[p.method])
+                .join(' + ') || '—'
+            : '—'}
         </td>
       )}
       {showReturned && (

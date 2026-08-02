@@ -7,6 +7,7 @@ import { listCosts } from '../api/costs'
 import { listProducts } from '../api/products'
 import { listSupplies } from '../api/supplies'
 import { useAuth } from '../lib/auth'
+import { paidWithMethod } from '../lib/order'
 import { formatMoney, toLocalDateStr } from '../lib/format'
 import { makeReportDoc, addReportTable, saveReport } from '../lib/reportPdf'
 import {
@@ -75,9 +76,9 @@ export default function DeliveriesSummaryPage() {
   const ventasEfectivo = useMemo(() => {
     let sum = 0
     for (const o of myOrders ?? []) {
-      if (!o.paid || o.payment_method !== 'efectivo') continue
+      if (!o.paid) continue
       if (!inRange(toLocalDateStr(o.created_at))) continue
-      sum += Number(o.paid_amount ?? o.total)
+      sum += paidWithMethod(o, 'efectivo')
     }
     return sum
     // eslint-disable-next-line react-hooks/exhaustive-deps
