@@ -1,5 +1,5 @@
 import { supabase } from '../lib/supabase'
-import type { OrderDetail, OrderStatus, PaymentMethod } from '../types/db'
+import type { OrderDetail, PaymentMethod } from '../types/db'
 
 export interface OrderItemInput {
   product_id: string
@@ -129,67 +129,57 @@ export async function updateOrder(
   }
 }
 
-export async function updateOrderStatus(
-  id: string,
-  status: OrderStatus
-): Promise<void> {
-  // Al volver a un estado anterior a "pagado" se limpia la info de pago,
-  // para que un pedido marcado por error no quede con método/monto fantasma.
-  // Al volver a "pedido" (deshacer la entrega) también se limpian los bidones
-  // devueltos, porque la entrega en sí queda anulada.
-  const patch: Record<string, unknown> = { status }
-  if (status !== 'paid') {
-    patch.payment_method = null
-    patch.paid_amount = null
-  }
-  if (status === 'ordered') {
-    patch.returned_bidones = null
-  }
-  const { error } = await supabase.from('orders').update(patch).eq('id', id)
-  if (error) throw error
-}
-
 /**
- * Marca el pedido como entregado, guardando los bidones devueltos y el método
- * de pago acordado. Como aún no pagó, el monto queda en null.
+ * Marca el pedido como ENTREGADO, guardando los bidones devueltos y el método de
+ * pago acordado. Opcionalmente lo marca pagado en el mismo paso (paidAmount).
  */
 export async function markOrderDelivered(
   id: string,
   returnedBidones: number,
-  paymentMethod: PaymentMethod
+  paymentMethod: PaymentMethod,
+  paidAmount?: number | null
 ): Promise<void> {
+  const patch: Record<string, unknown> = {
+    status: 'delivered',
+    returned_bidones: returnedBidones,
+    payment_method: paymentMethod,
+  }
+  if (paidAmount != null) {
+    patch.paid = true
+    patch.paid_amount = paidAmount
+  }
+  const { error } = await supabase.from('orders').update(patch).eq('id', id)
+  if (error) throw error
+}
+
+/** Deshace la entrega: vuelve a 'ordered' y limpia los bidones devueltos. */
+export async function undeliverOrder(id: string): Promise<void> {
   const { error } = await supabase
     .from('orders')
-    .update({
-      status: 'delivered',
-      returned_bidones: returnedBidones,
-      payment_method: paymentMethod,
-      paid_amount: null,
-    })
+    .update({ status: 'ordered', returned_bidones: null })
     .eq('id', id)
   if (error) throw error
 }
 
-/**
- * Marca el pedido como pagado registrando el método y el monto recibido.
- * `returnedBidones` sólo se envía cuando se entrega y cobra en un mismo paso;
- * al cobrar un pedido ya entregado se omite para no pisar el valor previo.
- */
+/** Marca el pedido como PAGADO (independiente de la entrega). */
 export async function markOrderPaid(
   id: string,
   paymentMethod: PaymentMethod,
-  paidAmount: number,
-  returnedBidones?: number
+  paidAmount: number
 ): Promise<void> {
-  const patch: Record<string, unknown> = {
-    status: 'paid',
-    payment_method: paymentMethod,
-    paid_amount: paidAmount,
-  }
-  if (returnedBidones !== undefined) {
-    patch.returned_bidones = returnedBidones
-  }
-  const { error } = await supabase.from('orders').update(patch).eq('id', id)
+  const { error } = await supabase
+    .from('orders')
+    .update({ paid: true, payment_method: paymentMethod, paid_amount: paidAmount })
+    .eq('id', id)
+  if (error) throw error
+}
+
+/** Deshace el pago: paid=false y limpia el monto (conserva el método acordado). */
+export async function unmarkOrderPaid(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('orders')
+    .update({ paid: false, paid_amount: null })
+    .eq('id', id)
   if (error) throw error
 }
 

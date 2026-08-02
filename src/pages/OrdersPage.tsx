@@ -17,7 +17,7 @@ import { OrderItemsList } from '../components/OrderItems'
 import { ClientCombobox } from '../components/ClientCombobox'
 import { Modal } from '../components/Modal'
 import { OrderActions } from '../components/OrderActions'
-import { PAYMENT_LABELS, StatusBadge } from '../components/StatusBadge'
+import { PaidBadge, PAYMENT_LABELS, StatusBadge } from '../components/StatusBadge'
 import {
   Button,
   CallButton,
@@ -40,15 +40,21 @@ interface DraftItem {
 
 const PAGE_SIZE = 10
 
-// 'unpaid' agrupa los que aún deben pagar (pedido o entregado).
-type StatusFilter = 'all' | 'unpaid' | OrderStatus
+// Estado de ENTREGA (el pago va en su propio filtro).
+type StatusFilter = 'all' | OrderStatus
 
 const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
   { value: 'all', label: 'Todos' },
-  { value: 'unpaid', label: 'Pendientes de pago' },
   { value: 'ordered', label: 'Pedido' },
   { value: 'delivered', label: 'Entregado' },
+]
+
+type PaidFilter = 'all' | 'paid' | 'unpaid'
+
+const PAID_FILTERS: { value: PaidFilter; label: string }[] = [
+  { value: 'all', label: 'Todos' },
   { value: 'paid', label: 'Pagado' },
+  { value: 'unpaid', label: 'Pendiente' },
 ]
 
 export default function OrdersPage() {
@@ -82,6 +88,7 @@ export default function OrdersPage() {
 
   const [dateFilter, setDateFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [paidFilter, setPaidFilter] = useState<PaidFilter>('all')
   const [paymentFilter, setPaymentFilter] = useState<'all' | PaymentMethod>(
     'all'
   )
@@ -96,19 +103,32 @@ export default function OrdersPage() {
       if (filterClientId && o.client_id !== filterClientId) return false
       if (paymentFilter !== 'all' && o.payment_method !== paymentFilter)
         return false
-      if (statusFilter === 'unpaid') return o.status !== 'paid'
+      if (paidFilter === 'paid' && !o.paid) return false
+      if (paidFilter === 'unpaid' && o.paid) return false
       if (statusFilter !== 'all' && o.status !== statusFilter) return false
       return true
     })
-  }, [orders, dateFilter, statusFilter, paymentFilter, filterClientId])
+  }, [
+    orders,
+    dateFilter,
+    statusFilter,
+    paidFilter,
+    paymentFilter,
+    filterClientId,
+  ])
 
   const hasFilters = Boolean(
-    dateFilter || filterClientId || statusFilter !== 'all' || paymentFilter !== 'all'
+    dateFilter ||
+      filterClientId ||
+      statusFilter !== 'all' ||
+      paidFilter !== 'all' ||
+      paymentFilter !== 'all'
   )
   function clearFilters() {
     setDateFilter('')
     setFilterClientId('')
     setStatusFilter('all')
+    setPaidFilter('all')
     setPaymentFilter('all')
     setPage(1)
   }
@@ -319,6 +339,29 @@ export default function OrdersPage() {
               <div>
                 <Label>Pago</Label>
                 <div className="flex flex-wrap gap-1">
+                  {PAID_FILTERS.map((f) => (
+                    <button
+                      key={f.value}
+                      type="button"
+                      onClick={() => {
+                        setPaidFilter(f.value)
+                        setPage(1)
+                      }}
+                      className={`rounded-full px-3 py-1 text-sm font-medium transition-colors ${
+                        paidFilter === f.value
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <Label>Método</Label>
+                <div className="flex flex-wrap gap-1">
                   {(
                     [
                       { value: 'all', label: 'Todos' },
@@ -382,6 +425,7 @@ export default function OrdersPage() {
                         {orderClientName(o)}
                       </span>
                       <StatusBadge status={o.status} />
+                      <PaidBadge paid={o.paid} />
                     </div>
                     <p className="text-xs text-slate-400">
                       {formatDate(o.created_at)}
@@ -466,18 +510,19 @@ export default function OrdersPage() {
                       ↩ {o.returned_bidones} bidones devueltos
                     </p>
                   )}
-                  {o.status === 'delivered' && o.payment_method && (
-                    <p className="mt-1 text-sm text-slate-600">
-                      Método de pago: {PAYMENT_LABELS[o.payment_method]}
-                    </p>
-                  )}
-                  {o.status === 'paid' && o.payment_method && (
+                  {o.paid && o.payment_method ? (
                     <p className="mt-1 text-sm text-emerald-700">
                       ✓ Pagado con {PAYMENT_LABELS[o.payment_method]}
                       {o.paid_amount != null
                         ? ` — ${formatMoney(o.paid_amount)}`
                         : ''}
                     </p>
+                  ) : (
+                    o.payment_method && (
+                      <p className="mt-1 text-sm text-slate-600">
+                        Método (acordado): {PAYMENT_LABELS[o.payment_method]}
+                      </p>
+                    )
                   )}
                   <OrderActions
                     order={o}
@@ -839,7 +884,10 @@ function OrderRow({
         {formatMoney(o.total)}
       </td>
       <td className="px-3 py-2">
-        <StatusBadge status={o.status} />
+        <div className="flex flex-col items-start gap-1">
+          <StatusBadge status={o.status} />
+          <PaidBadge paid={o.paid} />
+        </div>
       </td>
       <td className="px-3 py-2 text-slate-700">
         {o.payment_method ? PAYMENT_LABELS[o.payment_method] : '—'}

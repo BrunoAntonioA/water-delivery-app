@@ -211,7 +211,7 @@ export function soldBySupplyOf(
   const m = new Map<string, number>()
   for (const s of route.stops ?? []) {
     const o = s.order
-    if (!o || (o.status !== 'delivered' && o.status !== 'paid')) continue
+    if (!o || o.status !== 'delivered') continue
     for (const it of o.items) {
       const links = productSupply.get(it.product_id)
       if (!links) continue

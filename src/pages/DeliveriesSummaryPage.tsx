@@ -82,7 +82,7 @@ export default function DeliveriesSummaryPage() {
   const ventasEfectivo = useMemo(() => {
     let sum = 0
     for (const o of myOrders ?? []) {
-      if (o.status !== 'paid' || o.payment_method !== 'efectivo') continue
+      if (!o.paid || o.payment_method !== 'efectivo') continue
       if (!inRange(toLocalDateStr(o.created_at))) continue
       sum += Number(o.paid_amount ?? o.total)
     }

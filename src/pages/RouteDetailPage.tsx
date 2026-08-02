@@ -41,7 +41,7 @@ import { orderClientName, returnedBidonesText } from '../lib/order'
 import { OrderItemsList } from '../components/OrderItems'
 import { Modal } from '../components/Modal'
 import { OrderActions } from '../components/OrderActions'
-import { PAYMENT_LABELS, StatusBadge } from '../components/StatusBadge'
+import { PaidBadge, PAYMENT_LABELS, StatusBadge } from '../components/StatusBadge'
 import {
   Button,
   CallButton,
@@ -969,7 +969,12 @@ function StopCells({
         {order ? formatMoney(order.total) : '—'}
       </td>
       <td className="px-3 py-2">
-        {order && <StatusBadge status={order.status} />}
+        {order && (
+          <div className="flex flex-col items-start gap-1">
+            <StatusBadge status={order.status} />
+            <PaidBadge paid={order.paid} />
+          </div>
+        )}
       </td>
       {showReturned && (
         <td className="px-3 py-2 text-slate-700">
@@ -1188,6 +1193,7 @@ function StopCardInner({
               {clientName}
             </span>
             {order && <StatusBadge status={order.status} />}
+            {order && <PaidBadge paid={order.paid} />}
           </div>
           {order && order.items.length > 0 && (
             <div className="mt-1.5 flex items-start gap-2 text-sm">
@@ -1224,7 +1230,7 @@ function StopCardInner({
                 <span>{order.returned_bidones} bidones devueltos</span>
               </div>
             )}
-          {order?.status === 'delivered' && order.payment_method && (
+          {order && !order.paid && order.payment_method && (
             <div className="mt-0.5 flex items-center gap-2 text-sm text-slate-600">
               <span aria-hidden>💳</span>
               <span>Método: {PAYMENT_LABELS[order.payment_method]}</span>

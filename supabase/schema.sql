@@ -158,6 +158,15 @@ alter table orders alter column client_id drop not null;
 -- Bidones que el cliente devolvió al momento de la entrega.
 alter table orders add column if not exists returned_bidones integer;
 
+-- El PAGO ahora es independiente del estado de entrega: un pedido puede estar
+-- pagado sin haber sido entregado (y viceversa). "status" queda sólo para la
+-- entrega ('ordered' | 'delivered'); el valor 'paid' del enum se deja de usar.
+alter table orders add column if not exists paid boolean not null default false;
+-- Migración: los pedidos que estaban en estado 'paid' pasan a paid=true y su
+-- estado de entrega a 'delivered' (estaban pagados => habían sido entregados).
+update orders set paid = true where status = 'paid';
+update orders set status = 'delivered' where status = 'paid';
+
 -- ----------------------------------------------------------------------------
 --  Ítems del pedido (un pedido tiene varios productos)
 -- ----------------------------------------------------------------------------
@@ -511,7 +520,7 @@ language sql stable security definer set search_path = public as $$
   left join profiles pf on pf.id = r.driver_id
   where r.company_id = current_company_id()
     and r.driver_id is not null
-    and o.status in ('delivered', 'paid')
+    and o.status = 'delivered'
     and (current_user_role() <> 'repartidor' or r.driver_id = auth.uid())
     and (p_driver_id is null or r.driver_id = p_driver_id)
     and (p_from is null or r.route_date >= p_from)
@@ -633,7 +642,7 @@ where load_confirmed = false
     or exists (
       select 1 from route_stops rs
       join orders o on o.id = rs.order_id
-      where rs.route_id = routes.id and o.status in ('delivered', 'paid')
+      where rs.route_id = routes.id and o.status = 'delivered'
     )
   );
 

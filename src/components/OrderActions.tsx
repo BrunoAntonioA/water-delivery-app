@@ -3,14 +3,10 @@ import { useState } from 'react'
 import {
   markOrderDelivered,
   markOrderPaid,
-  updateOrderStatus,
+  undeliverOrder,
+  unmarkOrderPaid,
 } from '../api/orders'
-import type {
-  OrderDetail,
-  OrderStatus,
-  PaymentMethod,
-  WhatsappTemplate,
-} from '../types/db'
+import type { OrderDetail, PaymentMethod, WhatsappTemplate } from '../types/db'
 import { useAuth } from '../lib/auth'
 import { formatMoney } from '../lib/format'
 import { orderClientName } from '../lib/order'
@@ -20,7 +16,7 @@ import {
   renderTemplate,
 } from '../lib/whatsapp'
 import { Modal } from './Modal'
-import { PAYMENT_LABELS, STATUS_LABELS } from './StatusBadge'
+import { PAYMENT_LABELS } from './StatusBadge'
 import { TemplatePicker } from './TemplatePicker'
 import { Button, Label, TextInput } from './ui'
 
@@ -58,31 +54,19 @@ export function OrderActions({
   const [returned, setReturned] = useState('0')
   const [chargeOpen, setChargeOpen] = useState(false)
 
-  const statusMutation = useMutation({
-    mutationFn: (status: OrderStatus) => updateOrderStatus(order.id, status),
-    onSuccess: () => {
-      onChanged()
-      setDeliverOpen(false)
-    },
-    onError: (err) => {
-      // Los botones "Deshacer" no tienen UI de error propia; avisamos aquí para
-      // que un fallo no parezca "no pasó nada".
-      alert(`No se pudo cambiar el estado: ${(err as Error).message}`)
-    },
-  })
-
-  function revertTo(status: OrderStatus) {
-    statusMutation.mutate(status)
-  }
+  const onUndoError = (err: unknown) =>
+    alert(`No se pudo actualizar: ${(err as Error).message}`)
 
   const deliverMutation = useMutation({
     mutationFn: ({
       returnedBidones,
       method,
+      paidAmount,
     }: {
       returnedBidones: number
       method: PaymentMethod
-    }) => markOrderDelivered(order.id, returnedBidones, method),
+      paidAmount?: number | null
+    }) => markOrderDelivered(order.id, returnedBidones, method, paidAmount),
     onSuccess: () => {
       onChanged()
       setDeliverOpen(false)
@@ -90,27 +74,32 @@ export function OrderActions({
   })
 
   const payMutation = useMutation({
-    mutationFn: ({
-      method,
-      amount,
-      returnedBidones,
-    }: {
-      method: PaymentMethod
-      amount: number
-      returnedBidones?: number
-    }) => markOrderPaid(order.id, method, amount, returnedBidones),
+    mutationFn: ({ method, amount }: { method: PaymentMethod; amount: number }) =>
+      markOrderPaid(order.id, method, amount),
     onSuccess: () => {
       onChanged()
       setPayOpen(false)
-      setDeliverOpen(false)
     },
   })
 
+  const undeliverMutation = useMutation({
+    mutationFn: () => undeliverOrder(order.id),
+    onSuccess: onChanged,
+    onError: onUndoError,
+  })
+
+  const unpayMutation = useMutation({
+    mutationFn: () => unmarkOrderPaid(order.id),
+    onSuccess: onChanged,
+    onError: onUndoError,
+  })
+
   const busy =
-    statusMutation.isPending ||
     deliverMutation.isPending ||
-    payMutation.isPending
-  const canCharge = order.status === 'ordered' || order.status === 'delivered'
+    payMutation.isPending ||
+    undeliverMutation.isPending ||
+    unpayMutation.isPending
+  const canCharge = !order.paid
   const amountMatches =
     payAmount.trim() !== '' && round2(Number(payAmount)) === round2(order.total)
   const canConfirmPayment = Boolean(payMethod) && amountMatches
@@ -152,47 +141,36 @@ export function OrderActions({
           </Button>
         )}
 
-        {order.status === 'ordered' && (
+        {/* Entrega */}
+        {order.status === 'ordered' ? (
           <Button onClick={openDeliver} disabled={busy}>
-            Marcar {STATUS_LABELS.delivered}
+            Marcar Entregado
+          </Button>
+        ) : (
+          <Button
+            variant="ghost"
+            onClick={() => undeliverMutation.mutate()}
+            disabled={busy}
+            title="Deshacer entrega (volver a Pedido)"
+          >
+            <UndoIcon /> Deshacer entrega
           </Button>
         )}
 
-        {order.status === 'delivered' && (
-          <>
-            <Button onClick={openPay} disabled={busy}>
-              Marcar {STATUS_LABELS.paid}
-            </Button>
-            <Button
-              variant="ghost"
-              onClick={() => revertTo('ordered')}
-              disabled={busy}
-              title="Volver a Pedido"
-            >
-              <UndoIcon /> Deshacer
-            </Button>
-          </>
-        )}
-
-        {order.status === 'paid' && (
-          <>
-            <Button
-              variant="ghost"
-              onClick={() => revertTo('delivered')}
-              disabled={busy}
-              title="Marcar como no pagado (volver a Entregado)"
-            >
-              <UndoIcon /> Deshacer pago
-            </Button>
-            <Button
-              variant="ghost"
-              onClick={() => revertTo('ordered')}
-              disabled={busy}
-              title="Volver a Pedido (anula entrega y pago)"
-            >
-              <UndoIcon /> Volver a pedido
-            </Button>
-          </>
+        {/* Pago (independiente de la entrega) */}
+        {!order.paid ? (
+          <Button onClick={openPay} disabled={busy}>
+            Marcar Pagado
+          </Button>
+        ) : (
+          <Button
+            variant="ghost"
+            onClick={() => unpayMutation.mutate()}
+            disabled={busy}
+            title="Marcar como no pagado"
+          >
+            <UndoIcon /> Deshacer pago
+          </Button>
         )}
       </div>
 
@@ -209,10 +187,10 @@ export function OrderActions({
             const returnedBidones = Number(returned)
             if (alsoPaid) {
               if (!amountMatches) return
-              payMutation.mutate({
-                method: payMethod,
-                amount: round2(Number(payAmount)),
+              deliverMutation.mutate({
                 returnedBidones,
+                method: payMethod,
+                paidAmount: round2(Number(payAmount)),
               })
             } else {
               deliverMutation.mutate({ returnedBidones, method: payMethod })
@@ -265,13 +243,9 @@ export function OrderActions({
             />
           )}
 
-          {(deliverMutation.isError || payMutation.isError) && (
+          {deliverMutation.isError && (
             <p className="text-sm text-red-600">
-              Error al guardar:{' '}
-              {
-                ((deliverMutation.error ?? payMutation.error) as Error)
-                  .message
-              }
+              Error al guardar: {(deliverMutation.error as Error).message}
             </p>
           )}
 

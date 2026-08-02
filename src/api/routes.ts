@@ -46,20 +46,23 @@ export async function listRoutes(): Promise<RouteSummary[]> {
   const { data, error } = await supabase
     .from('routes')
     .select(
-      '*, stops:route_stops(id, order:orders(status)), driver_profile:profiles!driver_id(full_name, email)'
+      '*, stops:route_stops(id, order:orders(status, paid)), driver_profile:profiles!driver_id(full_name, email)'
     )
     .order('route_date', { ascending: false })
   if (error) throw error
   return (data ?? []).map((r) => {
     const { stops, driver_profile, ...route } = r as Route & {
-      stops: { id: string; order: { status: OrderStatus } | null }[]
+      stops: {
+        id: string
+        order: { status: OrderStatus; paid: boolean } | null
+      }[]
       driver_profile: DriverProfile
     }
     const list = stops ?? []
     const deliveredCount = list.filter(
       (s) => s.order && s.order.status !== 'ordered'
     ).length
-    const paidCount = list.filter((s) => s.order?.status === 'paid').length
+    const paidCount = list.filter((s) => s.order?.paid).length
     return {
       ...route,
       stopCount: list.length,

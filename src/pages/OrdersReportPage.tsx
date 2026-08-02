@@ -42,14 +42,20 @@ import {
 
 const PAGE_SIZE = 15
 
-type StatusFilter = 'all' | 'unpaid' | OrderStatus
+type StatusFilter = 'all' | OrderStatus
 
 const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
   { value: 'all', label: 'Todos' },
-  { value: 'unpaid', label: 'Pendientes de pago' },
   { value: 'ordered', label: 'Pedido' },
   { value: 'delivered', label: 'Entregado' },
+]
+
+type PaidFilter = 'all' | 'paid' | 'unpaid'
+
+const PAID_FILTERS: { value: PaidFilter; label: string }[] = [
+  { value: 'all', label: 'Todos' },
   { value: 'paid', label: 'Pagado' },
+  { value: 'unpaid', label: 'Pendiente' },
 ]
 
 
@@ -92,6 +98,7 @@ export default function OrdersReportPage() {
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [paidFilter, setPaidFilter] = useState<PaidFilter>('all')
   const [clientId, setClientId] = useState('')
   const [paymentFilter, setPaymentFilter] = useState<'all' | PaymentMethod>(
     'all'
@@ -120,11 +127,21 @@ export default function OrdersReportPage() {
       if (driverId && o.driverId !== driverId) return false
       if (paymentFilter !== 'all' && o.payment_method !== paymentFilter)
         return false
-      if (statusFilter === 'unpaid') return o.status !== 'paid'
+      if (paidFilter === 'paid' && !o.paid) return false
+      if (paidFilter === 'unpaid' && o.paid) return false
       if (statusFilter !== 'all' && o.status !== statusFilter) return false
       return true
     })
-  }, [orders, fromDate, toDate, statusFilter, clientId, driverId, paymentFilter])
+  }, [
+    orders,
+    fromDate,
+    toDate,
+    statusFilter,
+    paidFilter,
+    clientId,
+    driverId,
+    paymentFilter,
+  ])
 
   const totalSum = useMemo(
     () => filtered.reduce((sum, o) => sum + Number(o.total), 0),
@@ -143,6 +160,7 @@ export default function OrdersReportPage() {
       toDate ||
       clientId ||
       statusFilter !== 'all' ||
+      paidFilter !== 'all' ||
       paymentFilter !== 'all' ||
       driverId
   )
@@ -151,6 +169,7 @@ export default function OrdersReportPage() {
     setFromDate('')
     setToDate('')
     setStatusFilter('all')
+    setPaidFilter('all')
     setClientId('')
     setPaymentFilter('all')
     setDriverId('')
@@ -187,7 +206,7 @@ export default function OrdersReportPage() {
           .join('; '),
         formatMoney(o.total),
         STATUS_LABELS[o.status],
-        o.status === 'paid' && o.payment_method
+        o.paid && o.payment_method
           ? PAYMENT_LABELS[o.payment_method]
           : '',
       ])
@@ -356,6 +375,29 @@ export default function OrdersReportPage() {
           <div>
             <Label>Pago</Label>
             <div className="flex flex-wrap gap-1">
+              {PAID_FILTERS.map((f) => (
+                <button
+                  key={f.value}
+                  type="button"
+                  onClick={() => {
+                    setPaidFilter(f.value)
+                    setPage(1)
+                  }}
+                  className={`rounded-full px-3 py-1 text-sm font-medium transition-colors ${
+                    paidFilter === f.value
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <Label>Método</Label>
+            <div className="flex flex-wrap gap-1">
               {(
                 [
                   { value: 'all', label: 'Todos' },
@@ -453,7 +495,7 @@ export default function OrdersReportPage() {
                           <StatusBadge status={o.status} />
                         </td>
                         <td className="whitespace-nowrap px-3 py-2 text-slate-600">
-                          {o.status === 'paid' && o.payment_method
+                          {o.paid && o.payment_method
                             ? PAYMENT_LABELS[o.payment_method]
                             : '—'}
                         </td>
@@ -500,7 +542,7 @@ function CashFlowTab({
     let tarjeta = 0
     let otros = 0
     for (const o of orders) {
-      if (o.status !== 'paid') continue
+      if (!o.paid) continue
       const date = toLocalDateStr(o.created_at)
       if (fromDate && date < fromDate) continue
       if (toDate && date > toDate) continue
@@ -583,7 +625,7 @@ function CashFlowTab({
     type Mov = { date: string; tipo: string; detalle: string; monto: string }
     const movimientos: Mov[] = []
     for (const o of orders) {
-      if (o.status !== 'paid') continue
+      if (!o.paid) continue
       const date = toLocalDateStr(o.created_at)
       if (fromDate && date < fromDate) continue
       if (toDate && date > toDate) continue
@@ -878,10 +920,10 @@ function RepartidoresTab({
       const date = toLocalDateStr(o.created_at)
       if (fromDate && date < fromDate) continue
       if (toDate && date > toDate) continue
-      if (o.status === 'paid' && o.payment_method === 'efectivo') {
+      if (o.paid && o.payment_method === 'efectivo') {
         efectivo += Number(o.paid_amount ?? o.total)
       }
-      if (o.status === 'delivered' || o.status === 'paid') {
+      if (o.status === 'delivered') {
         for (const it of o.items) {
           const cur = productQty.get(it.product_id) ?? {
             name: it.product?.name ?? 'Producto',

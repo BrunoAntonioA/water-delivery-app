@@ -1,4 +1,5 @@
-export type OrderStatus = 'ordered' | 'delivered' | 'paid'
+// Estado de ENTREGA (el pago va aparte, en el booleano `paid`).
+export type OrderStatus = 'ordered' | 'delivered'
 
 export type PaymentMethod = 'transferencia' | 'efectivo' | 'tarjeta'
 
@@ -77,7 +78,8 @@ export interface Order {
   client_id: string | null
   customer_name: string | null
   address_id: string | null
-  status: OrderStatus
+  status: OrderStatus // entrega
+  paid: boolean // pago (independiente de la entrega)
   total: number
   payment_method: PaymentMethod | null
   paid_amount: number | null
