@@ -299,6 +299,86 @@ alter table companies add column if not exists modules text[] not null default a
 ];
 
 -- ----------------------------------------------------------------------------
+--  Planes comerciales (catálogo) y suscripción por empresa.
+--  El PLAN define qué módulos y límites tiene la empresa; la SUSCRIPCIÓN define
+--  si la empresa tiene acceso vigente (prueba, activa, vencida, cancelada…).
+-- ----------------------------------------------------------------------------
+create table if not exists plans (
+  id          uuid primary key default gen_random_uuid(),
+  key         text not null unique,             -- 'inicial' | 'pro' | 'full'
+  name        text not null,
+  description text,
+  price       numeric(12, 2) not null default 0,  -- CLP por período
+  interval    text not null default 'month',
+  modules     text[] not null default '{}',     -- módulos incluidos en el plan
+  max_users   integer,                          -- null = ilimitado
+  max_clients integer,                          -- null = ilimitado
+  trial_days  integer not null default 10,
+  sort        integer not null default 0,       -- orden de despliegue
+  is_public   boolean not null default true,    -- visible en la landing
+  active      boolean not null default true,
+  created_at  timestamptz not null default now()
+);
+
+-- Semilla/actualización de los tres planes (idempotente por "key").
+insert into plans (key, name, description, price, modules, max_users, max_clients, trial_days, sort)
+values
+  ('inicial', 'Inicial',
+   'Para partir a ordenar tu reparto sin complicaciones.',
+   25000, array['rutas','pedidos','clientes','productos'], 3, 500, 10, 1),
+  ('pro', 'Pro',
+   'La opción completa para distribuidoras que están creciendo.',
+   40000, array['rutas','pedidos','clientes','productos','costos','entregas','reportes','plantillas'],
+   8, 5000, 10, 2),
+  ('full', 'Full',
+   'Sin límites, para operaciones grandes con varios camiones.',
+   50000, array['rutas','pedidos','clientes','productos','costos','entregas','reportes','plantillas','usuarios'],
+   null, null, 10, 3)
+on conflict (key) do update set
+  name        = excluded.name,
+  description = excluded.description,
+  price       = excluded.price,
+  modules     = excluded.modules,
+  max_users   = excluded.max_users,
+  max_clients = excluded.max_clients,
+  trial_days  = excluded.trial_days,
+  sort        = excluded.sort;
+
+create table if not exists subscriptions (
+  id                       uuid primary key default gen_random_uuid(),
+  company_id               uuid not null unique references companies (id) on delete cascade,
+  plan_id                  uuid references plans (id),
+  status                   text not null default 'trialing'
+    check (status in ('trialing','active','past_due','paused','canceled','manual')),
+  access_until             timestamptz,   -- fin de acceso (prueba/período). null = sin vencimiento
+  trial_end                timestamptz,   -- informativo
+  activated_at             timestamptz,
+  canceled_at              timestamptz,
+  notes                    text,
+  provider_customer_id     text,          -- Flow (fase posterior)
+  provider_subscription_id text,          -- Flow (fase posterior)
+  created_at               timestamptz not null default now(),
+  updated_at               timestamptz not null default now()
+);
+create index if not exists subscriptions_company_id_idx on subscriptions (company_id);
+
+-- Pagos de la suscripción (registro manual mientras no está integrado Flow). La
+-- empresa los ve en su módulo "Suscripción"; sólo el superadmin los registra.
+create table if not exists subscription_payments (
+  id           uuid primary key default gen_random_uuid(),
+  company_id   uuid not null references companies (id) on delete cascade,
+  amount       numeric(12, 2) not null default 0,
+  paid_at      date not null default current_date,
+  method       text,           -- 'transferencia' | 'efectivo' | 'tarjeta' | 'flow' | ...
+  period_start date,
+  period_end   date,
+  notes        text,
+  created_at   timestamptz not null default now()
+);
+create index if not exists subscription_payments_company_id_idx
+  on subscription_payments (company_id);
+
+-- ----------------------------------------------------------------------------
 --  Perfiles: enlaza cada usuario de Supabase Auth con su empresa y rol.
 --  El id es el mismo que auth.users.id.
 -- ----------------------------------------------------------------------------
@@ -324,9 +404,41 @@ create index if not exists routes_driver_id_idx on routes (driver_id);
 --  Funciones auxiliares (SECURITY DEFINER: leen profiles sin gatillar RLS,
 --  evitando recursión en las políticas).
 -- ----------------------------------------------------------------------------
-create or replace function public.current_company_id()
+-- Empresa del usuario SIN condicionar a la suscripción. Se usa para leer su
+-- propia empresa/suscripción aunque esté vencida (y así poder mostrar el aviso
+-- de pago). NO usar para aislar datos del negocio: para eso está current_company_id().
+create or replace function public.my_company_id()
 returns uuid language sql stable security definer set search_path = public as $$
   select company_id from public.profiles where id = auth.uid() and active
+$$;
+
+-- ¿La empresa tiene acceso vigente? Una empresa SIN fila de suscripción se
+-- considera "legado" y mantiene acceso (no rompe empresas ya existentes). Con
+-- suscripción, sólo tienen acceso los estados vigentes y no vencidos.
+create or replace function public.company_has_access(cid uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select cid is not null and (
+    not exists (select 1 from public.subscriptions s where s.company_id = cid)
+    or exists (
+      select 1 from public.subscriptions s
+      where s.company_id = cid
+        and s.status in ('trialing', 'active', 'manual')
+        and (s.access_until is null or s.access_until > now())
+    )
+  )
+$$;
+
+-- Empresa "efectiva" para aislar los datos del negocio: la del usuario, pero
+-- sólo si su suscripción está vigente. Si venció/canceló, devuelve null y las
+-- políticas de todas las tablas del negocio dejan de calzar (bloqueo real, no
+-- sólo visual).
+create or replace function public.current_company_id()
+returns uuid language sql stable security definer set search_path = public as $$
+  select p.company_id
+  from public.profiles p
+  where p.id = auth.uid()
+    and p.active
+    and public.company_has_access(p.company_id)
 $$;
 
 create or replace function public.is_superadmin()
@@ -852,7 +964,36 @@ create policy "tenant_order_items" on order_items for all
 -- puede renombrar la suya.
 drop policy if exists "companies_read" on companies;
 create policy "companies_read" on companies for select
-  using (is_superadmin() or id = current_company_id());
+  using (is_superadmin() or id = my_company_id());
+
+-- Planes: catálogo de lectura pública (para la landing y el selector interno);
+-- sólo el superadmin los modifica.
+alter table plans enable row level security;
+drop policy if exists "plans_read" on plans;
+create policy "plans_read" on plans for select using (true);
+drop policy if exists "plans_superadmin" on plans;
+create policy "plans_superadmin" on plans for all
+  using (is_superadmin()) with check (is_superadmin());
+
+-- Suscripciones: cada empresa lee la suya (aunque esté vencida, vía
+-- my_company_id()); sólo el superadmin las crea/edita (fase manual).
+alter table subscriptions enable row level security;
+drop policy if exists "subscriptions_read" on subscriptions;
+create policy "subscriptions_read" on subscriptions for select
+  using (is_superadmin() or company_id = my_company_id());
+drop policy if exists "subscriptions_superadmin" on subscriptions;
+create policy "subscriptions_superadmin" on subscriptions for all
+  using (is_superadmin()) with check (is_superadmin());
+
+-- Pagos de suscripción: la empresa lee los suyos (aunque esté vencida); sólo el
+-- superadmin los registra.
+alter table subscription_payments enable row level security;
+drop policy if exists "sub_payments_read" on subscription_payments;
+create policy "sub_payments_read" on subscription_payments for select
+  using (is_superadmin() or company_id = my_company_id());
+drop policy if exists "sub_payments_superadmin" on subscription_payments;
+create policy "sub_payments_superadmin" on subscription_payments for all
+  using (is_superadmin()) with check (is_superadmin());
 
 drop policy if exists "companies_superadmin" on companies;
 create policy "companies_superadmin" on companies for all

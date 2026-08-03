@@ -2,7 +2,9 @@ import { useState } from 'react'
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth } from './lib/auth'
 import { effectiveModules, ROLE_LABELS, type ModuleKey } from './types/auth'
+import { subscriptionActive, accessDaysLeft } from './types/billing'
 import { Button, Spinner } from './components/ui'
+import { BillingWall } from './components/BillingWall'
 import ClientsPage from './pages/ClientsPage'
 import ProductsPage from './pages/ProductsPage'
 import OrdersPage from './pages/OrdersPage'
@@ -16,6 +18,7 @@ import CompanyDetailPage from './pages/CompanyDetailPage'
 import TemplatesPage from './pages/TemplatesPage'
 import UsersPage from './pages/UsersPage'
 import CompaniesPage from './pages/CompaniesPage'
+import SubscriptionPage from './pages/SubscriptionPage'
 import LoginPage from './pages/LoginPage'
 
 const NAV: { module: ModuleKey; to: string; label: string; icon: string }[] = [
@@ -28,6 +31,7 @@ const NAV: { module: ModuleKey; to: string; label: string; icon: string }[] = [
   { module: 'reportes', to: '/reportes', label: 'Reportes', icon: '📊' },
   { module: 'plantillas', to: '/plantillas', label: 'Plantillas', icon: '💬' },
   { module: 'usuarios', to: '/usuarios', label: 'Usuarios', icon: '🔑' },
+  { module: 'suscripcion', to: '/suscripcion', label: 'Suscripción', icon: '💳' },
   { module: 'empresas', to: '/empresas', label: 'Empresas', icon: '🏢' },
 ]
 
@@ -41,10 +45,9 @@ function Protected({
   home: string
   children: React.ReactNode
 }) {
-  const { profile, company } = useAuth()
-  const allowed = profile
-    ? effectiveModules(profile.role, company?.modules)
-    : []
+  const { profile, company, subscription } = useAuth()
+  const companyModules = subscription?.plan?.modules ?? company?.modules
+  const allowed = profile ? effectiveModules(profile.role, companyModules) : []
   if (!profile || !allowed.includes(module)) {
     return <Navigate to={home} replace />
   }
@@ -96,7 +99,7 @@ function LoadingScreen() {
 }
 
 export default function App() {
-  const { session, profile, company, loading, profileLoading, signOut } =
+  const { session, profile, company, subscription, loading, profileLoading, signOut } =
     useAuth()
   const [menuOpen, setMenuOpen] = useState(false)
 
@@ -132,9 +135,27 @@ export default function App() {
     )
   }
 
-  const allowed = effectiveModules(profile.role, company?.modules)
+  // Muro de pago: si la empresa no tiene suscripción vigente (prueba vencida,
+  // pausada o cancelada) se bloquea el acceso. El superadmin no depende de
+  // empresa, así que nunca lo ve.
+  if (profile.role !== 'superadmin' && company && !subscriptionActive(subscription)) {
+    return (
+      <BillingWall
+        companyName={company.name}
+        subscription={subscription}
+        onSignOut={signOut}
+      />
+    )
+  }
+
+  // Los módulos vienen del PLAN cuando la empresa tiene uno; si no (empresa
+  // "legado"), se usa la lista manual de la empresa.
+  const companyModules = subscription?.plan?.modules ?? company?.modules
+  const allowed = effectiveModules(profile.role, companyModules)
   const navItems = NAV.filter((n) => allowed.includes(n.module))
   const home = navItems[0]?.to ?? '/'
+  const trialDaysLeft =
+    subscription?.status === 'trialing' ? accessDaysLeft(subscription) : null
 
   // Sin módulos habilitados (el superadmin los desactivó todos): evitamos un
   // bucle de redirección mostrando un aviso.
@@ -205,6 +226,15 @@ export default function App() {
         </aside>
 
         <main className="min-w-0 flex-1 px-4 py-8 sm:px-6 lg:px-8">
+        {trialDaysLeft != null && (
+          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
+            🎁 Estás en período de prueba —{' '}
+            <span className="font-semibold">
+              {trialDaysLeft} {trialDaysLeft === 1 ? 'día restante' : 'días restantes'}
+            </span>
+            {subscription?.plan?.name ? ` del plan ${subscription.plan.name}.` : '.'}
+          </div>
+        )}
         <Routes>
           <Route path="/" element={<Navigate to={home} replace />} />
           <Route
@@ -292,6 +322,14 @@ export default function App() {
             element={
               <Protected module="usuarios" home={home}>
                 <UsersPage />
+              </Protected>
+            }
+          />
+          <Route
+            path="/suscripcion"
+            element={
+              <Protected module="suscripcion" home={home}>
+                <SubscriptionPage />
               </Protected>
             }
           />

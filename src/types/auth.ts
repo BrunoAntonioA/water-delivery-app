@@ -27,7 +27,12 @@ export type ModuleKey =
   | 'costos'
   | 'plantillas'
   | 'usuarios'
+  | 'suscripcion'
   | 'empresas'
+
+// Módulos "de cuenta": siempre visibles para quien tenga el rol, sin depender
+// del plan de la empresa (p. ej. ver y pagar la suscripción).
+export const ALWAYS_ON_MODULES: ModuleKey[] = ['suscripcion']
 
 // Qué módulos puede ver cada rol.
 export const ROLE_MODULES: Record<Role, ModuleKey[]> = {
@@ -42,6 +47,7 @@ export const ROLE_MODULES: Record<Role, ModuleKey[]> = {
     'costos',
     'plantillas',
     'usuarios',
+    'suscripcion',
   ],
   operador: ['pedidos', 'reportes', 'clientes', 'productos', 'costos'],
   repartidor: ['rutas', 'entregas', 'costos'],
@@ -81,6 +87,7 @@ export const MODULE_LABELS: Record<ModuleKey, string> = {
   costos: 'Costos',
   plantillas: 'Plantillas',
   usuarios: 'Usuarios',
+  suscripcion: 'Suscripción',
   empresas: 'Empresas',
 }
 
@@ -95,5 +102,7 @@ export function effectiveModules(
 ): ModuleKey[] {
   const roleModules = ROLE_MODULES[role]
   if (role === 'superadmin' || !companyModules) return roleModules
-  return roleModules.filter((m) => companyModules.includes(m))
+  return roleModules.filter(
+    (m) => companyModules.includes(m) || ALWAYS_ON_MODULES.includes(m)
+  )
 }

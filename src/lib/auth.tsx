@@ -7,12 +7,15 @@ import {
   type ReactNode,
 } from 'react'
 import { supabase } from './supabase'
+import { getCompanySubscription } from '../api/billing'
 import type { Company, Profile } from '../types/auth'
+import type { Subscription } from '../types/billing'
 
 interface AuthState {
   session: Session | null
   profile: Profile | null
   company: Company | null
+  subscription: Subscription | null
   loading: boolean
   /** true mientras se está cargando el perfil de una sesión existente. */
   profileLoading: boolean
@@ -53,6 +56,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
   const [company, setCompany] = useState<Company | null>(null)
+  const [subscription, setSubscription] = useState<Subscription | null>(null)
   const [loading, setLoading] = useState(true)
   const [profileLoading, setProfileLoading] = useState(false)
 
@@ -60,13 +64,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!userId) {
       setProfile(null)
       setCompany(null)
+      setSubscription(null)
       return
     }
     setProfileLoading(true)
     try {
       const p = await fetchProfile(userId)
       setProfile(p)
-      setCompany(p?.company_id ? await fetchCompany(p.company_id) : null)
+      if (p?.company_id) {
+        const [c, sub] = await Promise.all([
+          fetchCompany(p.company_id),
+          getCompanySubscription(p.company_id),
+        ])
+        setCompany(c)
+        setSubscription(sub)
+      } else {
+        setCompany(null)
+        setSubscription(null)
+      }
     } finally {
       setProfileLoading(false)
     }
@@ -105,6 +120,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await supabase.auth.signOut()
     setProfile(null)
     setCompany(null)
+    setSubscription(null)
   }
 
   async function reloadProfile() {
@@ -117,6 +133,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         session,
         profile,
         company,
+        subscription,
         loading,
         profileLoading,
         signIn,
