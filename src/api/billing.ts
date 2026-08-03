@@ -71,6 +71,43 @@ export async function saveSubscription(
   if (error) throw error
 }
 
+// --- Registro público (self-signup desde la landing) ---
+
+export interface SignupInput {
+  email: string
+  password: string
+  full_name: string
+  last_name: string
+  phone: string
+  rut: string
+  razon_social: string
+  plan_id: string
+  captchaToken?: string | null
+}
+
+/**
+ * Crea la cuenta (admin), su empresa y una suscripción en prueba (7 días). Toda
+ * la lógica corre en la Edge Function "signup-company" con el service role.
+ */
+export async function signupCompany(input: SignupInput): Promise<void> {
+  const { error } = await supabase.functions.invoke('signup-company', {
+    body: input,
+  })
+  if (error) {
+    let message = error.message
+    const context = (error as { context?: Response }).context
+    if (context && typeof context.json === 'function') {
+      try {
+        const body = await context.json()
+        if (body?.error) message = body.error
+      } catch {
+        /* sin cuerpo JSON: se usa el mensaje genérico */
+      }
+    }
+    throw new Error(message)
+  }
+}
+
 // --- Pagos de la suscripción (registro manual) ---
 
 /** Pagos de una empresa (más recientes primero). Tolera tabla inexistente. */

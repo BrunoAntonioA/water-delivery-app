@@ -2,7 +2,11 @@ import { useState } from 'react'
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth } from './lib/auth'
 import { effectiveModules, ROLE_LABELS, type ModuleKey } from './types/auth'
-import { subscriptionActive, accessDaysLeft } from './types/billing'
+import {
+  subscriptionActive,
+  accessDaysLeft,
+  resolvedCompanyModules,
+} from './types/billing'
 import { Button, Spinner } from './components/ui'
 import { BillingWall } from './components/BillingWall'
 import ClientsPage from './pages/ClientsPage'
@@ -19,6 +23,7 @@ import TemplatesPage from './pages/TemplatesPage'
 import UsersPage from './pages/UsersPage'
 import CompaniesPage from './pages/CompaniesPage'
 import SubscriptionPage from './pages/SubscriptionPage'
+import SignupPage from './pages/SignupPage'
 import LoginPage from './pages/LoginPage'
 
 const NAV: { module: ModuleKey; to: string; label: string; icon: string }[] = [
@@ -46,7 +51,7 @@ function Protected({
   children: React.ReactNode
 }) {
   const { profile, company, subscription } = useAuth()
-  const companyModules = subscription?.plan?.modules ?? company?.modules
+  const companyModules = resolvedCompanyModules(subscription, company?.modules)
   const allowed = profile ? effectiveModules(profile.role, companyModules) : []
   if (!profile || !allowed.includes(module)) {
     return <Navigate to={home} replace />
@@ -105,8 +110,15 @@ export default function App() {
 
   if (loading) return <LoadingScreen />
 
-  // Sin sesión → login.
-  if (!session) return <LoginPage />
+  // Sin sesión → login, con registro público en /registro (enlace desde la landing).
+  if (!session) {
+    return (
+      <Routes>
+        <Route path="/registro" element={<SignupPage />} />
+        <Route path="*" element={<LoginPage />} />
+      </Routes>
+    )
+  }
 
   // Con sesión pero el perfil aún cargando (p. ej. tras refrescar el token o con
   // internet lento): mostramos "Cargando" en lugar de un "Sin acceso" prematuro.
@@ -148,9 +160,9 @@ export default function App() {
     )
   }
 
-  // Los módulos vienen del PLAN cuando la empresa tiene uno; si no (empresa
-  // "legado"), se usa la lista manual de la empresa.
-  const companyModules = subscription?.plan?.modules ?? company?.modules
+  // Durante la prueba se otorgan los módulos de prueba (Pro sin "usuarios");
+  // con plan activo, los del plan; si no (empresa "legado"), su lista manual.
+  const companyModules = resolvedCompanyModules(subscription, company?.modules)
   const allowed = effectiveModules(profile.role, companyModules)
   const navItems = NAV.filter((n) => allowed.includes(n.module))
   const home = navItems[0]?.to ?? '/'
@@ -204,6 +216,18 @@ export default function App() {
 
           {/* Usuario + salir a la derecha */}
           <div className="flex shrink-0 items-center gap-3 text-sm">
+            {trialDaysLeft != null && (
+              <span
+                className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800"
+                title={`Período de prueba${subscription?.plan?.name ? ` del plan ${subscription.plan.name}` : ''}`}
+              >
+                🎁 Prueba
+                <span className="hidden sm:inline">:</span>
+                <span className="font-semibold">
+                  {trialDaysLeft} {trialDaysLeft === 1 ? 'día' : 'días'}
+                </span>
+              </span>
+            )}
             <div className="hidden text-right sm:block">
               <p className="font-medium text-slate-700">
                 {profile.full_name || profile.email}
@@ -226,15 +250,6 @@ export default function App() {
         </aside>
 
         <main className="min-w-0 flex-1 px-4 py-8 sm:px-6 lg:px-8">
-        {trialDaysLeft != null && (
-          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
-            🎁 Estás en período de prueba —{' '}
-            <span className="font-semibold">
-              {trialDaysLeft} {trialDaysLeft === 1 ? 'día restante' : 'días restantes'}
-            </span>
-            {subscription?.plan?.name ? ` del plan ${subscription.plan.name}.` : '.'}
-          </div>
-        )}
         <Routes>
           <Route path="/" element={<Navigate to={home} replace />} />
           <Route

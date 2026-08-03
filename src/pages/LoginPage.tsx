@@ -160,6 +160,13 @@ export default function LoginPage() {
             {loading ? 'Entrando…' : locked ? 'Bloqueado' : 'Entrar'}
           </Button>
         </form>
+
+        <p className="mt-4 text-center text-sm text-slate-500">
+          ¿No tienes cuenta?{' '}
+          <a href="/registro" className="font-medium text-sky-600 hover:underline">
+            Crea tu empresa gratis
+          </a>
+        </p>
       </Card>
     </div>
   )

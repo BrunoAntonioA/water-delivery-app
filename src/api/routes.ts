@@ -16,17 +16,33 @@ export interface Driver {
   id: string
   full_name: string | null
   email: string | null
+  role: 'admin' | 'repartidor'
 }
 
-/** Repartidores de la empresa (para asignarlos a una ruta). */
+/**
+ * Usuarios que pueden ir asignados a una ruta: los repartidores y también los
+ * admins (un admin puede hacer reparto). Se listan los repartidores primero.
+ */
 export async function listDrivers(): Promise<Driver[]> {
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, full_name, email')
-    .eq('role', 'repartidor')
+    .select('id, full_name, email, role')
+    .in('role', ['repartidor', 'admin'])
     .order('full_name', { ascending: true })
   if (error) throw error
-  return (data ?? []) as Driver[]
+  const rows = (data ?? []) as Driver[]
+  return rows.sort((a, b) => {
+    if (a.role !== b.role) return a.role === 'repartidor' ? -1 : 1
+    return (a.full_name || a.email || '').localeCompare(
+      b.full_name || b.email || ''
+    )
+  })
+}
+
+/** Etiqueta para el selector de repartidor (marca a los admins). */
+export function driverLabel(d: Driver): string {
+  const name = d.full_name || d.email || 'Sin nombre'
+  return d.role === 'admin' ? `${name} (admin)` : name
 }
 
 export interface RouteSummary extends Route {

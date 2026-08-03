@@ -1,5 +1,19 @@
 import type { ModuleKey } from './auth'
 
+// Módulos que se otorgan durante la PRUEBA (equivalente al plan Pro: todo menos
+// "usuarios"). Se aplican mientras la suscripción está en estado 'trialing',
+// sin importar el plan elegido.
+export const TRIAL_MODULES: ModuleKey[] = [
+  'rutas',
+  'pedidos',
+  'clientes',
+  'productos',
+  'costos',
+  'entregas',
+  'reportes',
+  'plantillas',
+]
+
 export type SubscriptionStatus =
   | 'trialing'
   | 'active'
@@ -71,6 +85,19 @@ export function subscriptionActive(sub: Subscription | null): boolean {
   if (!['trialing', 'active', 'manual'].includes(sub.status)) return false
   if (sub.access_until && new Date(sub.access_until) <= new Date()) return false
   return true
+}
+
+/**
+ * Módulos efectivos de la empresa según su suscripción: durante la prueba se
+ * usan los TRIAL_MODULES (Pro sin "usuarios"); con plan activo, los del plan;
+ * si no hay suscripción (legado), la lista manual de la empresa.
+ */
+export function resolvedCompanyModules(
+  sub: Subscription | null,
+  companyModules: ModuleKey[] | undefined
+): ModuleKey[] | undefined {
+  if (sub?.status === 'trialing') return TRIAL_MODULES
+  return sub?.plan?.modules ?? companyModules
 }
 
 /** Días restantes de la prueba (o del período con vencimiento). Null si no aplica. */

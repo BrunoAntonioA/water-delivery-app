@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import {
   createRoute,
   deleteRoute,
+  driverLabel,
   listDrivers,
   listRoutes,
   setRouteDriver,
@@ -198,7 +199,7 @@ export default function RoutesPage() {
                         <option value="">Sin repartidor</option>
                         {drivers?.map((d) => (
                           <option key={d.id} value={d.id}>
-                            {d.full_name || d.email}
+                            {driverLabel(d)}
                           </option>
                         ))}
                       </select>
@@ -287,13 +288,14 @@ export default function RoutesPage() {
               <option value="">Sin repartidor</option>
               {drivers?.map((d) => (
                 <option key={d.id} value={d.id}>
-                  {d.full_name || d.email}
+                  {driverLabel(d)}
                 </option>
               ))}
             </select>
             {drivers && drivers.length === 0 && (
               <p className="mt-1 text-xs text-slate-400">
-                No tienes usuarios con rol Repartidor. Créalos en Usuarios.
+                No tienes usuarios para asignar. Crea repartidores (o admins) en
+                Usuarios.
               </p>
             )}
           </div>

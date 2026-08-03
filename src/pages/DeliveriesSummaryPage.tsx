@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import { getDeliverySummary } from '../api/deliveries'
-import { listDrivers } from '../api/routes'
+import { driverLabel, listDrivers } from '../api/routes'
 import { listOrders } from '../api/orders'
 import { listCosts } from '../api/costs'
 import { listProducts } from '../api/products'
@@ -226,7 +226,7 @@ export default function DeliveriesSummaryPage() {
                 <option value="">Todos los repartidores</option>
                 {(drivers ?? []).map((d) => (
                   <option key={d.id} value={d.id}>
-                    {d.full_name || d.email || 'Sin nombre'}
+                    {driverLabel(d)}
                   </option>
                 ))}
               </select>

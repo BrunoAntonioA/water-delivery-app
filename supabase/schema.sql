@@ -297,6 +297,11 @@ alter table companies add column if not exists modules text[] not null default a
   'pedidos', 'reportes', 'entregas', 'rutas', 'clientes',
   'productos', 'costos', 'plantillas', 'usuarios'
 ];
+-- Datos comerciales de la empresa (se capturan en el registro público).
+alter table companies add column if not exists rut text;
+alter table companies add column if not exists razon_social text;
+alter table companies add column if not exists phone text;
+alter table companies add column if not exists email text;
 
 -- ----------------------------------------------------------------------------
 --  Planes comerciales (catálogo) y suscripción por empresa.
