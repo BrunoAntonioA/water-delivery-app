@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import { listPlans, signupCompany } from '../api/billing'
-import { useAuth } from '../lib/auth'
+import { supabase } from '../lib/supabase'
 import { formatMoney } from '../lib/format'
 import { Turnstile, turnstileConfigured } from '../components/Turnstile'
 import { Button, Card, Label, TextInput } from '../components/ui'
@@ -10,7 +10,6 @@ import { Button, Card, Label, TextInput } from '../components/ui'
 const TRIAL_DAYS = 10
 
 export default function SignupPage() {
-  const { signIn } = useAuth()
   const [params] = useSearchParams()
   const { data: plans } = useQuery({ queryKey: ['plans'], queryFn: listPlans })
 
@@ -78,9 +77,14 @@ export default function SignupPage() {
         plan_id: effectivePlanId,
         captchaToken,
       })
+      // No se inicia sesión: primero debe verificar su correo. Disparamos el
+      // correo de verificación (la cuenta se creó sin confirmar).
+      await supabase.auth.resend({
+        type: 'signup',
+        email: email.trim(),
+        options: { emailRedirectTo: window.location.origin },
+      })
       setDone(true)
-      // Inicia sesión automáticamente: la app pasa a la vista autenticada.
-      await signIn(email.trim(), password)
     } catch (err) {
       setError((err as Error).message)
       window.turnstile?.reset()
@@ -94,11 +98,23 @@ export default function SignupPage() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
         <Card className="w-full max-w-sm p-6 text-center">
-          <div className="mb-2 text-4xl">✅</div>
-          <h1 className="text-xl font-bold text-slate-900">¡Cuenta creada!</h1>
+          <div className="mb-2 text-4xl">📩</div>
+          <h1 className="text-xl font-bold text-slate-900">Revisa tu correo</h1>
           <p className="mt-2 text-sm text-slate-500">
-            Entrando a tu cuenta…
+            Enviamos un enlace de verificación a{' '}
+            <span className="font-medium text-slate-700">{email.trim()}</span>.
+            Ábrelo para activar tu cuenta e iniciar tu prueba de {TRIAL_DAYS} días.
           </p>
+          <p className="mt-4 text-xs text-slate-400">
+            ¿No lo ves? Revisa el spam. El enlace te llevará de vuelta a la
+            aplicación.
+          </p>
+          <a
+            href="/"
+            className="mt-5 inline-block text-sm font-medium text-sky-600 hover:underline"
+          >
+            Volver a iniciar sesión
+          </a>
         </Card>
       </div>
     )

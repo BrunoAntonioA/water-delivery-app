@@ -10,7 +10,13 @@ import {
 import { createClient, listClients } from '../api/clients'
 import { listProducts } from '../api/products'
 import type { OrderDetail, OrderStatus, PaymentMethod } from '../types/db'
-import { formatDate, formatMoney, toLocalDateStr } from '../lib/format'
+import {
+  formatDate,
+  formatDatePart,
+  formatMoney,
+  formatTimePart,
+  toLocalDateStr,
+} from '../lib/format'
 import { useIsMobile } from '../lib/useIsMobile'
 import {
   orderClientName,
@@ -563,12 +569,13 @@ export default function OrdersPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase text-slate-500">
+                  <tr className="border-b border-slate-200 bg-slate-50 text-center text-xs uppercase text-slate-500">
                     <th className="px-3 py-2">Cliente</th>
+                    <th className="w-16 px-2 py-2">Fecha de creación</th>
                     <th className="px-3 py-2">Productos</th>
                     <th className="px-3 py-2">Dirección</th>
                     <th className="px-3 py-2">Teléfono</th>
-                    <th className="px-3 py-2 text-right">Total</th>
+                    <th className="px-3 py-2">Total</th>
                     <th className="px-3 py-2">Estado</th>
                     <th className="px-3 py-2">Método</th>
                     <th className="px-3 py-2 text-center">Devueltos</th>
@@ -614,79 +621,94 @@ export default function OrdersPage() {
           }}
           className="space-y-4"
         >
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <Label>Cliente *</Label>
-              {newClientMode ? (
-                <div className="space-y-2 rounded-lg border border-sky-200 bg-sky-50/60 p-3">
-                  <p className="text-sm font-medium text-slate-700">
-                    Registrar cliente nuevo
-                  </p>
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    <TextInput
-                      value={newClient.name}
-                      onChange={(e) =>
-                        setNewClient({ ...newClient, name: e.target.value })
-                      }
-                      placeholder="Nombre *"
-                      autoFocus
-                    />
-                    <TextInput
-                      value={newClient.surname}
-                      onChange={(e) =>
-                        setNewClient({ ...newClient, surname: e.target.value })
-                      }
-                      placeholder="Apellido"
-                    />
-                  </div>
+          {newClientMode ? (
+            <div className="space-y-3 rounded-xl border border-sky-200 bg-sky-50/60 p-4">
+              <p className="font-medium text-slate-800">
+                Registrar cliente nuevo
+              </p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <Label>Nombre *</Label>
                   <TextInput
-                    value={newClient.phone}
+                    value={newClient.name}
                     onChange={(e) =>
-                      setNewClient({ ...newClient, phone: e.target.value })
+                      setNewClient({ ...newClient, name: e.target.value })
                     }
-                    placeholder="Teléfono * (+56912345678)"
+                    placeholder="Nombre"
+                    autoFocus
                   />
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    <TextInput
-                      value={newClient.address}
-                      onChange={(e) =>
-                        setNewClient({ ...newClient, address: e.target.value })
-                      }
-                      placeholder="Dirección *"
-                    />
-                    <TextInput
-                      value={newClient.comuna}
-                      onChange={(e) =>
-                        setNewClient({ ...newClient, comuna: e.target.value })
-                      }
-                      placeholder="Comuna *"
-                    />
-                  </div>
-                  {createClientMutation.isError && (
-                    <p className="text-sm text-red-600">
-                      Error: {(createClientMutation.error as Error).message}
-                    </p>
-                  )}
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      onClick={() => createClientMutation.mutate()}
-                      disabled={!canSaveNewClient || createClientMutation.isPending}
-                    >
-                      {createClientMutation.isPending
-                        ? 'Guardando…'
-                        : 'Guardar y usar'}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() => setNewClientMode(false)}
-                    >
-                      Cancelar
-                    </Button>
-                  </div>
                 </div>
-              ) : (
+                <div>
+                  <Label>Apellido</Label>
+                  <TextInput
+                    value={newClient.surname}
+                    onChange={(e) =>
+                      setNewClient({ ...newClient, surname: e.target.value })
+                    }
+                    placeholder="Apellido"
+                  />
+                </div>
+              </div>
+              <div>
+                <Label>Teléfono *</Label>
+                <TextInput
+                  value={newClient.phone}
+                  onChange={(e) =>
+                    setNewClient({ ...newClient, phone: e.target.value })
+                  }
+                  placeholder="+56912345678"
+                />
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <Label>Dirección *</Label>
+                  <TextInput
+                    value={newClient.address}
+                    onChange={(e) =>
+                      setNewClient({ ...newClient, address: e.target.value })
+                    }
+                    placeholder="Dirección"
+                  />
+                </div>
+                <div>
+                  <Label>Comuna *</Label>
+                  <TextInput
+                    value={newClient.comuna}
+                    onChange={(e) =>
+                      setNewClient({ ...newClient, comuna: e.target.value })
+                    }
+                    placeholder="Comuna"
+                  />
+                </div>
+              </div>
+              {createClientMutation.isError && (
+                <p className="text-sm text-red-600">
+                  Error: {(createClientMutation.error as Error).message}
+                </p>
+              )}
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  onClick={() => createClientMutation.mutate()}
+                  disabled={!canSaveNewClient || createClientMutation.isPending}
+                >
+                  {createClientMutation.isPending
+                    ? 'Guardando…'
+                    : 'Guardar y usar'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setNewClientMode(false)}
+                >
+                  Cancelar
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <Label>Cliente *</Label>
                 <ClientCombobox
                   clients={clients ?? []}
                   value={clientId}
@@ -699,31 +721,31 @@ export default function OrdersPage() {
                     setNewClientMode(true)
                   }}
                 />
-              )}
-            </div>
-            <div>
-              <Label>Dirección de entrega</Label>
-              <select
-                value={addressId}
-                onChange={(e) => setAddressId(e.target.value)}
-                disabled={!selectedClient?.addresses.length}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100 disabled:bg-slate-50"
-              >
-                <option value="">
-                  {selectedClient?.addresses.length
-                    ? 'Selecciona una dirección…'
-                    : 'Sin direcciones'}
-                </option>
-                {selectedClient?.addresses.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.label ? `${a.label}: ` : ''}
-                    {a.address}
-                    {a.comuna ? `, ${a.comuna}` : ''}
+              </div>
+              <div>
+                <Label>Dirección de entrega</Label>
+                <select
+                  value={addressId}
+                  onChange={(e) => setAddressId(e.target.value)}
+                  disabled={!selectedClient?.addresses.length}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100 disabled:bg-slate-50"
+                >
+                  <option value="">
+                    {selectedClient?.addresses.length
+                      ? 'Selecciona una dirección…'
+                      : 'Sin direcciones'}
                   </option>
-                ))}
-              </select>
+                  {selectedClient?.addresses.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.label ? `${a.label}: ` : ''}
+                      {a.address}
+                      {a.comuna ? `, ${a.comuna}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
-          </div>
+          )}
 
           <div>
             <div className="mb-1 flex items-center justify-between">
@@ -911,14 +933,22 @@ function OrderRow({
     ? [o.address.address, o.address.comuna].filter(Boolean).join(', ')
     : ''
   return (
-    <tr className="border-b border-slate-100 last:border-0 [&>td]:align-middle">
+    <tr className="border-b border-slate-100 last:border-0 [&>td]:align-middle [&>td]:text-center">
       <td className="px-3 py-2 font-medium text-slate-800">{clientName}</td>
+      <td className="w-16 whitespace-nowrap px-2 py-2 text-center text-slate-600">
+        <div className="leading-tight">
+          <div>{formatDatePart(o.created_at)}</div>
+          <div className="text-xs text-slate-400">
+            {formatTimePart(o.created_at)}
+          </div>
+        </div>
+      </td>
       <td className="px-3 py-2 text-slate-600">
         <OrderItemsList items={o.items} />
       </td>
       <td className="px-3 py-2 text-slate-600">
         {o.address ? (
-          <div className="flex items-center gap-1">
+          <div className="flex items-center justify-center gap-1">
             <span className="min-w-0">{addressFull}</span>
             <CopyButton value={o.address.address} label="Copiar dirección" />
             <MapButton query={addressFull} />
@@ -929,7 +959,7 @@ function OrderRow({
       </td>
       <td className="px-3 py-2 text-slate-600">
         {o.client?.phone ? (
-          <div className="flex items-center gap-1">
+          <div className="flex items-center justify-center gap-1">
             <span>{o.client.phone}</span>
             <CallButton phone={o.client.phone} />
             <CopyButton value={o.client.phone} label="Copiar teléfono" />
@@ -938,11 +968,11 @@ function OrderRow({
           '—'
         )}
       </td>
-      <td className="px-3 py-2 text-right font-medium text-slate-800">
+      <td className="px-3 py-2 font-medium text-slate-800">
         {formatMoney(o.total)}
       </td>
       <td className="px-3 py-2">
-        <div className="flex flex-col items-start gap-1">
+        <div className="flex flex-col items-center gap-1">
           <StatusBadge status={o.status} />
           <PaidBadge paid={o.paid} />
         </div>
@@ -959,7 +989,7 @@ function OrderRow({
         <OrderActions
           order={o}
           onChanged={onChanged}
-          className="flex w-40 flex-col items-stretch gap-1"
+          className="mx-auto flex w-40 flex-col items-stretch gap-1"
         />
       </td>
       <td className="px-2 py-2">

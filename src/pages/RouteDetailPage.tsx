@@ -36,7 +36,12 @@ import { ClientCombobox } from '../components/ClientCombobox'
 import type { OrderDetail, RouteStopWithOrder } from '../types/db'
 import { useAuth } from '../lib/auth'
 import { useIsMobile } from '../lib/useIsMobile'
-import { formatDateOnly, formatMoney } from '../lib/format'
+import {
+  formatDateOnly,
+  formatDatePart,
+  formatMoney,
+  formatTimePart,
+} from '../lib/format'
 import {
   orderClientName,
   orderPaymentList,
@@ -824,6 +829,7 @@ function StopsTableHead({
         <th className="w-8 px-2 py-2">{sortable ? '' : '✓'}</th>
         <th className="w-8 px-2 py-2">#</th>
         <th className="px-3 py-2">Cliente</th>
+        <th className="w-16 px-2 py-2 text-center">Fecha de creación</th>
         <th className="px-3 py-2">Productos</th>
         <th className="px-3 py-2">Dirección</th>
         <th className="px-3 py-2">Teléfono</th>
@@ -869,6 +875,7 @@ function StopCells({
             </span>
           </div>
         </td>
+        <td className="px-2 py-2 text-center text-slate-400">—</td>
         <td className="px-3 py-2 text-slate-600">
           {pickupItemsText(pickup, supplyName)}
         </td>
@@ -941,6 +948,18 @@ function StopCells({
   return (
     <>
       <td className="px-3 py-2 font-medium text-slate-800">{clientName}</td>
+      <td className="w-16 whitespace-nowrap px-2 py-2 text-center text-slate-600">
+        {order ? (
+          <div className="leading-tight">
+            <div>{formatDatePart(order.created_at)}</div>
+            <div className="text-xs text-slate-400">
+              {formatTimePart(order.created_at)}
+            </div>
+          </div>
+        ) : (
+          '—'
+        )}
+      </td>
       <td className="px-3 py-2 text-slate-600">
         {order ? <OrderItemsList items={order.items} /> : '—'}
       </td>

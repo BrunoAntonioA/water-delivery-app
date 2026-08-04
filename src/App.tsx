@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
+import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { useAuth } from './lib/auth'
 import { effectiveModules, ROLE_LABELS, type ModuleKey } from './types/auth'
 import {
@@ -24,7 +24,9 @@ import UsersPage from './pages/UsersPage'
 import CompaniesPage from './pages/CompaniesPage'
 import SubscriptionPage from './pages/SubscriptionPage'
 import SignupPage from './pages/SignupPage'
+import ResetPasswordPage from './pages/ResetPasswordPage'
 import LoginPage from './pages/LoginPage'
+import { VerifyEmailWall } from './components/VerifyEmailWall'
 
 const NAV: { module: ModuleKey; to: string; label: string; icon: string }[] = [
   { module: 'rutas', to: '/rutas', label: 'Rutas', icon: '🚚' },
@@ -106,7 +108,12 @@ function LoadingScreen() {
 export default function App() {
   const { session, profile, company, subscription, loading, profileLoading, signOut } =
     useAuth()
+  const location = useLocation()
   const [menuOpen, setMenuOpen] = useState(false)
+
+  // Nueva contraseña: se llega por el enlace de recuperación (crea una sesión
+  // temporal), así que debe mostrarse siempre, sin importar el estado de auth.
+  if (location.pathname === '/nueva-clave') return <ResetPasswordPage />
 
   if (loading) return <LoadingScreen />
 
@@ -144,6 +151,14 @@ export default function App() {
           Cerrar sesión
         </Button>
       </div>
+    )
+  }
+
+  // Correo sin verificar → pantalla de verificación (los usuarios creados por un
+  // admin y el superadmin ya vienen confirmados, así que no la ven).
+  if (!session.user.email_confirmed_at) {
+    return (
+      <VerifyEmailWall email={session.user.email ?? ''} onSignOut={signOut} />
     )
   }
 

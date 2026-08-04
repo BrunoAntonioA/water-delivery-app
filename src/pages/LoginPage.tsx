@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../lib/auth'
-import { isSupabaseConfigured } from '../lib/supabase'
+import { isSupabaseConfigured, supabase } from '../lib/supabase'
 import {
   getGuardState,
   recordFailure,
@@ -26,6 +26,26 @@ export default function LoginPage() {
 
   const [captchaToken, setCaptchaToken] = useState<string | null>(null)
   const [humanChecked, setHumanChecked] = useState(false)
+
+  // Recuperar contraseña.
+  const [forgot, setForgot] = useState(false)
+  const [resetSent, setResetSent] = useState(false)
+  const [resetLoading, setResetLoading] = useState(false)
+
+  async function onReset(e: React.FormEvent) {
+    e.preventDefault()
+    setResetLoading(true)
+    try {
+      await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: `${window.location.origin}/nueva-clave`,
+      })
+    } catch (err) {
+      console.error(err)
+    }
+    // Mensaje genérico: no revelamos si el correo existe.
+    setResetSent(true)
+    setResetLoading(false)
+  }
 
   // "now" avanza cada segundo para actualizar el estado del bloqueo y el conteo.
   const [now, setNow] = useState(() => Date.now())
@@ -104,6 +124,61 @@ export default function LoginPage() {
           </p>
         )}
 
+        {forgot ? (
+          <div className="space-y-4">
+            {resetSent ? (
+              <>
+                <p className="text-sm text-slate-600">
+                  Si existe una cuenta con ese correo, te enviamos un enlace para
+                  restablecer la contraseña. Revisa tu bandeja (y el spam).
+                </p>
+                <Button
+                  variant="secondary"
+                  className="w-full"
+                  onClick={() => {
+                    setForgot(false)
+                    setResetSent(false)
+                  }}
+                >
+                  Volver a iniciar sesión
+                </Button>
+              </>
+            ) : (
+              <form onSubmit={onReset} className="space-y-4">
+                <p className="text-sm text-slate-500">
+                  Ingresa tu correo y te enviaremos un enlace para crear una
+                  nueva contraseña.
+                </p>
+                <div>
+                  <Label>Correo</Label>
+                  <TextInput
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="tu@correo.com"
+                    required
+                    autoFocus
+                  />
+                </div>
+                <Button
+                  type="submit"
+                  className="w-full"
+                  disabled={resetLoading || !email.trim()}
+                >
+                  {resetLoading ? 'Enviando…' : 'Enviar enlace'}
+                </Button>
+                <button
+                  type="button"
+                  onClick={() => setForgot(false)}
+                  className="w-full text-center text-sm text-slate-500 hover:underline"
+                >
+                  Volver a iniciar sesión
+                </button>
+              </form>
+            )}
+          </div>
+        ) : (
+          <>
         <form onSubmit={onSubmit} className="space-y-4">
           <div>
             <Label>Correo</Label>
@@ -161,12 +236,22 @@ export default function LoginPage() {
           </Button>
         </form>
 
+        <button
+          type="button"
+          onClick={() => setForgot(true)}
+          className="mt-3 w-full text-center text-sm text-sky-600 hover:underline"
+        >
+          ¿Olvidaste tu contraseña?
+        </button>
+
         <p className="mt-4 text-center text-sm text-slate-500">
           ¿No tienes cuenta?{' '}
           <a href="/registro" className="font-medium text-sky-600 hover:underline">
             Crea tu empresa gratis
           </a>
         </p>
+          </>
+        )}
       </Card>
     </div>
   )

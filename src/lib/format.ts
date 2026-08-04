@@ -15,6 +15,20 @@ export function formatDate(iso: string): string {
   }).format(new Date(iso))
 }
 
+/** Sólo la fecha (sin hora) de un timestamp ISO. */
+export function formatDatePart(iso: string): string {
+  return new Intl.DateTimeFormat(LOCALE, { dateStyle: 'medium' }).format(
+    new Date(iso)
+  )
+}
+
+/** Sólo la hora de un timestamp ISO. */
+export function formatTimePart(iso: string): string {
+  return new Intl.DateTimeFormat(LOCALE, { timeStyle: 'short' }).format(
+    new Date(iso)
+  )
+}
+
 /** Para fechas sin hora ("YYYY-MM-DD"), evitando corrimientos de zona horaria. */
 export function formatDateOnly(dateStr: string): string {
   const [y, m, d] = dateStr.split('-').map(Number)

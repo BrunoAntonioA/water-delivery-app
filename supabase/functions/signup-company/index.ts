@@ -26,6 +26,11 @@ const json = (body: unknown, status = 200) =>
 
 const TRIAL_DAYS = 10
 
+// Normalizadores para comparar sin importar el formato:
+// RUT: sin puntos/guiones/espacios y en mayúscula (la "K"). Teléfono: sólo dígitos.
+const normRut = (s: string) => s.replace(/[.\-\s]/g, '').toUpperCase()
+const normPhone = (s: string) => s.replace(/\D/g, '')
+
 async function verifyCaptcha(token: string | undefined): Promise<boolean> {
   const secret = Deno.env.get('TURNSTILE_SECRET')
   if (!secret) return true // captcha no configurado: no se exige
@@ -90,11 +95,31 @@ Deno.serve(async (req) => {
     .maybeSingle()
   if (!plan) return json({ error: 'Plan no válido' }, 400)
 
-  // 4) Crear la cuenta de Auth (email ya confirmado para poder iniciar sesión).
+  // 3b) RUT y teléfono únicos: no puede haber dos empresas con el mismo (el
+  //     correo lo valida Auth al crear la cuenta). Se comparan normalizados.
+  const { data: companies } = await admin
+    .from('companies')
+    .select('rut, phone')
+  const rutN = normRut(rut)
+  const phoneN = normPhone(phone)
+  for (const c of companies ?? []) {
+    if (c.rut && normRut(c.rut) === rutN) {
+      return json({ error: 'Ya existe una empresa registrada con ese RUT.' }, 409)
+    }
+    if (c.phone && normPhone(c.phone) === phoneN) {
+      return json(
+        { error: 'Ya existe una empresa registrada con ese teléfono.' },
+        409
+      )
+    }
+  }
+
+  // 4) Crear la cuenta de Auth SIN confirmar: el usuario debe verificar su correo
+  //    (el correo de verificación lo dispara el frontend con auth.resend).
   const { data: created, error: createErr } = await admin.auth.admin.createUser({
     email,
     password,
-    email_confirm: true,
+    email_confirm: false,
   })
   if (createErr || !created.user) {
     const msg = createErr?.message ?? 'No se pudo crear la cuenta'
