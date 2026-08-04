@@ -62,7 +62,7 @@ export async function listRoutes(): Promise<RouteSummary[]> {
   const { data, error } = await supabase
     .from('routes')
     .select(
-      '*, stops:route_stops(id, order:orders(status, paid)), driver_profile:profiles!driver_id(full_name, email)'
+      '*, stops:route_stops(id, order:orders(status, paid), pickup:route_pickups(done)), driver_profile:profiles!driver_id(full_name, email)'
     )
     .order('route_date', { ascending: false })
   if (error) throw error
@@ -71,14 +71,19 @@ export async function listRoutes(): Promise<RouteSummary[]> {
       stops: {
         id: string
         order: { status: OrderStatus; paid: boolean } | null
+        pickup: { done: boolean } | null
       }[]
       driver_profile: DriverProfile
     }
     const list = stops ?? []
+    // Una parada está "completada" si el pedido se entregó o si el retiro se
+    // recogió (los retiros no tienen "order" pero cuentan como cumplidos).
     const deliveredCount = list.filter(
-      (s) => s.order && s.order.status !== 'ordered'
+      (s) => (s.order && s.order.status !== 'ordered') || s.pickup?.done
     ).length
-    const paidCount = list.filter((s) => s.order?.paid).length
+    const paidCount = list.filter(
+      (s) => s.order?.paid || s.pickup?.done
+    ).length
     return {
       ...route,
       stopCount: list.length,
