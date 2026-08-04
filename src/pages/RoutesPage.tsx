@@ -14,6 +14,7 @@ import {
 import { useAuth } from '../lib/auth'
 import { formatDateOnly } from '../lib/format'
 import { Modal } from '../components/Modal'
+import { DateRangeFilter } from '../components/DateRangeFilter'
 import {
   Button,
   Card,
@@ -89,13 +90,18 @@ export default function RoutesPage() {
     setModalOpen(true)
   }
 
-  const [dateFilter, setDateFilter] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
   const [page, setPage] = useState(1)
 
   const filtered = useMemo(
     () =>
-      (routes ?? []).filter((r) => !dateFilter || r.route_date === dateFilter),
-    [routes, dateFilter]
+      (routes ?? []).filter(
+        (r) =>
+          (!dateFrom || r.route_date >= dateFrom) &&
+          (!dateTo || r.route_date <= dateTo)
+      ),
+    [routes, dateFrom, dateTo]
   )
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
   const currentPage = Math.min(page, pageCount)
@@ -118,32 +124,37 @@ export default function RoutesPage() {
         }
       />
 
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <span className="text-sm text-slate-500">Filtrar por día:</span>
-        <TextInput
-          type="date"
-          value={dateFilter}
-          onChange={(e) => {
-            setDateFilter(e.target.value)
+      <Card className="mb-4 p-4">
+        <DateRangeFilter
+          from={dateFrom}
+          to={dateTo}
+          onChange={(f, t) => {
+            setDateFrom(f)
+            setDateTo(t)
             setPage(1)
           }}
-          className="w-full sm:w-auto"
+          label="Fecha"
         />
-        {dateFilter && (
-          <Button
-            variant="ghost"
-            onClick={() => {
-              setDateFilter('')
-              setPage(1)
-            }}
-          >
-            Limpiar
-          </Button>
-        )}
-        <span className="ml-auto text-sm text-slate-400">
-          {filtered.length} {filtered.length === 1 ? 'ruta' : 'rutas'}
-        </span>
-      </div>
+        <div className="mt-2 flex items-center justify-between">
+          {dateFrom || dateTo ? (
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setDateFrom('')
+                setDateTo('')
+                setPage(1)
+              }}
+            >
+              Limpiar
+            </Button>
+          ) : (
+            <span />
+          )}
+          <span className="text-sm text-slate-400">
+            {filtered.length} {filtered.length === 1 ? 'ruta' : 'rutas'}
+          </span>
+        </div>
+      </Card>
 
       {isLoading ? (
         <Spinner />

@@ -25,6 +25,7 @@ import {
   TextArea,
   TextInput,
 } from '../components/ui'
+import { DateRangeFilter } from '../components/DateRangeFilter'
 
 const PAGE_SIZE = 12
 
@@ -210,35 +211,17 @@ export default function CostsPage() {
 
       {/* --- Filtros --- */}
       <Card className="mb-4 p-4">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <Label>Rango de fechas</Label>
-            <div className="flex flex-wrap items-center gap-2">
-              <TextInput
-                type="date"
-                value={fromDate}
-                max={toDate || undefined}
-                onChange={(e) => {
-                  setFromDate(e.target.value)
-                  setPage(1)
-                }}
-                className="w-full sm:w-auto"
-                aria-label="Desde"
-              />
-              <span className="hidden text-sm text-slate-400 sm:inline">a</span>
-              <TextInput
-                type="date"
-                value={toDate}
-                min={fromDate || undefined}
-                onChange={(e) => {
-                  setToDate(e.target.value)
-                  setPage(1)
-                }}
-                className="w-full sm:w-auto"
-                aria-label="Hasta"
-              />
-            </div>
-          </div>
+        <DateRangeFilter
+          from={fromDate}
+          to={toDate}
+          onChange={(f, t) => {
+            setFromDate(f)
+            setToDate(t)
+            setPage(1)
+          }}
+          label="Fecha"
+        />
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <div>
             <Label>Categoría</Label>
             <select

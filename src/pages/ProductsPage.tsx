@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   createProduct,
   deleteProduct,
@@ -25,7 +25,17 @@ import {
   TextInput,
 } from '../components/ui'
 
-const PAGE_SIZE = 9
+const PAGE_SIZE = 12
+
+// Cuántas tarjetas por fila (en pantallas grandes). Las clases deben ser
+// literales para que Tailwind las incluya en el build.
+const COL_OPTIONS = [3, 4, 6] as const
+type Cols = (typeof COL_OPTIONS)[number]
+const COL_CLASSES: Record<Cols, string> = {
+  3: 'sm:grid-cols-2 lg:grid-cols-3',
+  4: 'sm:grid-cols-2 lg:grid-cols-4',
+  6: 'sm:grid-cols-3 lg:grid-cols-6',
+}
 
 interface SupplyRow {
   supply_id: string
@@ -67,11 +77,19 @@ export default function ProductsPage() {
   const [form, setForm] = useState<FormState>(emptyForm)
   const [uploading, setUploading] = useState(false)
   const [page, setPage] = useState(1)
+  const [search, setSearch] = useState('')
+  const [cols, setCols] = useState<Cols>(4)
 
-  const total = products?.length ?? 0
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    const all = products ?? []
+    return q ? all.filter((p) => p.name.toLowerCase().includes(q)) : all
+  }, [products, search])
+
+  const total = filtered.length
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const currentPage = Math.min(page, pageCount)
-  const pageItems = (products ?? []).slice(
+  const pageItems = filtered.slice(
     (currentPage - 1) * PAGE_SIZE,
     currentPage * PAGE_SIZE
   )
@@ -196,7 +214,46 @@ export default function ProductsPage() {
         </EmptyState>
       ) : (
         <>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <Card className="mb-4 p-4">
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div className="w-full sm:max-w-xs">
+              <Label>Buscar por nombre</Label>
+              <TextInput
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value)
+                  setPage(1)
+                }}
+                placeholder="Nombre del producto…"
+                className="w-full"
+              />
+            </div>
+            <div className="hidden lg:block">
+              <Label>Por fila</Label>
+              <div className="flex gap-1">
+                {COL_OPTIONS.map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => setCols(n)}
+                    className={`w-10 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                      cols === n
+                        ? 'bg-sky-600 text-white'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    {n}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </Card>
+        {filtered.length === 0 ? (
+          <EmptyState>No hay productos con ese nombre.</EmptyState>
+        ) : (
+        <>
+        <div className={`grid grid-cols-1 gap-4 ${COL_CLASSES[cols]}`}>
           {pageItems.map((p) => (
             <Card key={p.id} className="overflow-hidden">
               <div className="flex h-40 items-center justify-center bg-slate-100">
@@ -249,6 +306,8 @@ export default function ProductsPage() {
             pageCount={pageCount}
             onPage={setPage}
           />
+        </>
+        )}
         </>
       )}
 

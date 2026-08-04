@@ -28,6 +28,7 @@ import { ClientCombobox } from '../components/ClientCombobox'
 import { Modal } from '../components/Modal'
 import { OrderActions } from '../components/OrderActions'
 import { PaidBadge, PAYMENT_LABELS, StatusBadge } from '../components/StatusBadge'
+import { DateRangeFilter } from '../components/DateRangeFilter'
 import {
   Button,
   CallButton,
@@ -99,7 +100,8 @@ export default function OrdersPage() {
   const [newClientMode, setNewClientMode] = useState(false)
   const [newClient, setNewClient] = useState(emptyNewClient)
 
-  const [dateFilter, setDateFilter] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [paidFilter, setPaidFilter] = useState<PaidFilter>('all')
   const [paymentFilter, setPaymentFilter] = useState<'all' | PaymentMethod>(
@@ -112,7 +114,9 @@ export default function OrdersPage() {
 
   const filteredOrders = useMemo(() => {
     return (orders ?? []).filter((o) => {
-      if (dateFilter && toLocalDateStr(o.created_at) !== dateFilter) return false
+      const d = toLocalDateStr(o.created_at)
+      if (dateFrom && d < dateFrom) return false
+      if (dateTo && d > dateTo) return false
       if (filterClientId && o.client_id !== filterClientId) return false
       if (paymentFilter !== 'all' && o.payment_method !== paymentFilter)
         return false
@@ -123,7 +127,8 @@ export default function OrdersPage() {
     })
   }, [
     orders,
-    dateFilter,
+    dateFrom,
+    dateTo,
     statusFilter,
     paidFilter,
     paymentFilter,
@@ -131,14 +136,16 @@ export default function OrdersPage() {
   ])
 
   const hasFilters = Boolean(
-    dateFilter ||
+    dateFrom ||
+      dateTo ||
       filterClientId ||
       statusFilter !== 'all' ||
       paidFilter !== 'all' ||
       paymentFilter !== 'all'
   )
   function clearFilters() {
-    setDateFilter('')
+    setDateFrom('')
+    setDateTo('')
     setFilterClientId('')
     setStatusFilter('all')
     setPaidFilter('all')
@@ -318,18 +325,16 @@ export default function OrdersPage() {
                   }}
                 />
               </div>
-              <div>
-                <Label>Fecha</Label>
-                <TextInput
-                  type="date"
-                  value={dateFilter}
-                  onChange={(e) => {
-                    setDateFilter(e.target.value)
-                    setPage(1)
-                  }}
-                  className="w-full sm:w-auto"
-                />
-              </div>
+              <DateRangeFilter
+                from={dateFrom}
+                to={dateTo}
+                onChange={(f, t) => {
+                  setDateFrom(f)
+                  setDateTo(t)
+                  setPage(1)
+                }}
+                label="Fecha de creación"
+              />
             </div>
 
             <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:gap-6 sm:overflow-x-auto sm:pb-1">

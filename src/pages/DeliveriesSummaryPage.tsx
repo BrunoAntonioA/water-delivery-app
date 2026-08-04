@@ -10,6 +10,7 @@ import { useAuth } from '../lib/auth'
 import { paidWithMethod } from '../lib/order'
 import { formatMoney, toLocalDateStr } from '../lib/format'
 import { makeReportDoc, addReportTable, saveReport } from '../lib/reportPdf'
+import { DateRangeFilter } from '../components/DateRangeFilter'
 import {
   Button,
   Card,
@@ -18,7 +19,6 @@ import {
   Label,
   PageHeader,
   Spinner,
-  TextInput,
 } from '../components/ui'
 
 export default function DeliveriesSummaryPage() {
@@ -77,7 +77,12 @@ export default function DeliveriesSummaryPage() {
     let sum = 0
     for (const o of myOrders ?? []) {
       if (!o.paid) continue
-      if (!inRange(toLocalDateStr(o.created_at))) continue
+      // Se cuenta por FECHA DE ENTREGA. Si hay filtro y el pedido no tiene
+      // fecha de entrega (aún sin entregar), no entra en el rango.
+      if (fromDate || toDate) {
+        if (!o.delivered_at) continue
+        if (!inRange(toLocalDateStr(o.delivered_at))) continue
+      }
       sum += paidWithMethod(o, 'efectivo')
     }
     return sum
@@ -232,33 +237,16 @@ export default function DeliveriesSummaryPage() {
               </select>
             </div>
           )}
-          <div>
-            <div className="mb-1 flex items-center gap-1.5">
-              <span className="text-sm font-medium text-slate-700">
-                Rango de fechas (de la ruta)
-              </span>
-              <InfoHint text="Deja ambas para ver todo, o pon la misma fecha en las dos para un solo día." />
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <TextInput
-                type="date"
-                value={fromDate}
-                max={toDate || undefined}
-                onChange={(e) => setFromDate(e.target.value)}
-                className="w-full sm:w-auto"
-                aria-label="Desde"
-              />
-              <span className="hidden text-sm text-slate-400 sm:inline">a</span>
-              <TextInput
-                type="date"
-                value={toDate}
-                min={fromDate || undefined}
-                onChange={(e) => setToDate(e.target.value)}
-                className="w-full sm:w-auto"
-                aria-label="Hasta"
-              />
-            </div>
-          </div>
+          <DateRangeFilter
+            from={fromDate}
+            to={toDate}
+            onChange={(f, t) => {
+              setFromDate(f)
+              setToDate(t)
+            }}
+            label="Fecha de entrega del pedido"
+            hint="Se filtra por la fecha en que se marcó el pedido como entregado."
+          />
         </div>
 
         {hasFilters && (

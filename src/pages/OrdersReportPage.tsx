@@ -28,6 +28,7 @@ import {
   STATUS_LABELS,
   StatusBadge,
 } from '../components/StatusBadge'
+import { DateRangeFilter } from '../components/DateRangeFilter'
 import {
   Button,
   Card,
@@ -37,7 +38,6 @@ import {
   Pagination,
   PageHeader,
   Spinner,
-  TextInput,
 } from '../components/ui'
 
 const PAGE_SIZE = 15
@@ -297,39 +297,16 @@ export default function OrdersReportPage() {
               }}
             />
           </div>
-          <div>
-            <div className="mb-1 flex items-center gap-1.5">
-              <span className="text-sm font-medium text-slate-700">
-                Rango de fechas
-              </span>
-              <InfoHint text="Deja ambas para ver todo, o pon la misma fecha en las dos para un solo día." />
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <TextInput
-                type="date"
-                value={fromDate}
-                max={toDate || undefined}
-                onChange={(e) => {
-                  setFromDate(e.target.value)
-                  setPage(1)
-                }}
-                className="w-full sm:w-auto"
-                aria-label="Desde"
-              />
-              <span className="hidden text-sm text-slate-400 sm:inline">a</span>
-              <TextInput
-                type="date"
-                value={toDate}
-                min={fromDate || undefined}
-                onChange={(e) => {
-                  setToDate(e.target.value)
-                  setPage(1)
-                }}
-                className="w-full sm:w-auto"
-                aria-label="Hasta"
-              />
-            </div>
-          </div>
+          <DateRangeFilter
+            from={fromDate}
+            to={toDate}
+            onChange={(f, t) => {
+              setFromDate(f)
+              setToDate(t)
+              setPage(1)
+            }}
+            label="Fecha de creación"
+          />
           <div>
             <Label>Repartidor</Label>
             <select
@@ -682,42 +659,27 @@ function CashFlowTab({
     <div>
       {/* Filtro de fechas */}
       <Card className="mb-4 p-4">
-        <div className="mb-1 flex items-center gap-1.5">
-          <span className="text-sm font-medium text-slate-700">
-            Rango de fechas
-          </span>
-          <InfoHint text="Deja ambas para ver todo, o pon la misma fecha en las dos para un solo día." />
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <TextInput
-            type="date"
-            value={fromDate}
-            max={toDate || undefined}
-            onChange={(e) => setFromDate(e.target.value)}
-            className="w-full sm:w-auto"
-            aria-label="Desde"
-          />
-          <span className="hidden text-sm text-slate-400 sm:inline">a</span>
-          <TextInput
-            type="date"
-            value={toDate}
-            min={fromDate || undefined}
-            onChange={(e) => setToDate(e.target.value)}
-            className="w-full sm:w-auto"
-            aria-label="Hasta"
-          />
-          {(fromDate || toDate) && (
-            <Button
-              variant="ghost"
-              onClick={() => {
-                setFromDate('')
-                setToDate('')
-              }}
-            >
-              Limpiar
-            </Button>
-          )}
-        </div>
+        <DateRangeFilter
+          from={fromDate}
+          to={toDate}
+          onChange={(f, t) => {
+            setFromDate(f)
+            setToDate(t)
+          }}
+          label="Fecha"
+        />
+        {(fromDate || toDate) && (
+          <Button
+            variant="ghost"
+            className="mt-2"
+            onClick={() => {
+              setFromDate('')
+              setToDate('')
+            }}
+          >
+            Limpiar
+          </Button>
+        )}
       </Card>
 
       {/* KPIs */}
@@ -1038,33 +1000,16 @@ function RepartidoresTab({
               ))}
             </select>
           </div>
-          <div>
-            <div className="mb-1 flex items-center gap-1.5">
-              <span className="text-sm font-medium text-slate-700">
-                Rango de fechas (de entrega)
-              </span>
-              <InfoHint text="Se filtra por la fecha en que se marcó el pedido como entregado. Deja ambas para ver todo, o pon la misma fecha en las dos para un solo día." />
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <TextInput
-                type="date"
-                value={fromDate}
-                max={toDate || undefined}
-                onChange={(e) => setFromDate(e.target.value)}
-                className="w-full sm:w-auto"
-                aria-label="Desde"
-              />
-              <span className="hidden text-sm text-slate-400 sm:inline">a</span>
-              <TextInput
-                type="date"
-                value={toDate}
-                min={fromDate || undefined}
-                onChange={(e) => setToDate(e.target.value)}
-                className="w-full sm:w-auto"
-                aria-label="Hasta"
-              />
-            </div>
-          </div>
+          <DateRangeFilter
+            from={fromDate}
+            to={toDate}
+            onChange={(f, t) => {
+              setFromDate(f)
+              setToDate(t)
+            }}
+            label="Fecha de entrega"
+            hint="Se filtra por la fecha en que se marcó el pedido como entregado."
+          />
         </div>
       </Card>
 

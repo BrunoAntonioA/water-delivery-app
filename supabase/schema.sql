@@ -651,8 +651,12 @@ language sql stable security definer set search_path = public as $$
     and o.status = 'delivered'
     and (current_user_role() <> 'repartidor' or r.driver_id = auth.uid())
     and (p_driver_id is null or r.driver_id = p_driver_id)
-    and (p_from is null or r.route_date >= p_from)
-    and (p_to   is null or r.route_date <= p_to)
+    -- Se filtra por la FECHA DE ENTREGA (delivered_at), en hora local de Chile
+    -- para que coincida con las fechas que elige el usuario.
+    and (p_from is null
+         or (o.delivered_at at time zone 'America/Santiago')::date >= p_from)
+    and (p_to is null
+         or (o.delivered_at at time zone 'America/Santiago')::date <= p_to)
   group by r.driver_id, pf.full_name, pf.email, pr.id, pr.name
   order by driver_name, pr.name;
 $$;
