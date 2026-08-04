@@ -925,9 +925,14 @@ function RepartidoresTab({
     const supplyQty = new Map<string, number>()
     for (const o of orders) {
       if (o.driverId !== driverId) continue
-      const date = toLocalDateStr(o.created_at)
-      if (fromDate && date < fromDate) continue
-      if (toDate && date > toDate) continue
+      // La fecha del reporte es la de ENTREGA. Si el pedido no está entregado no
+      // tiene fecha de entrega: sólo se incluye cuando no hay filtro de fechas.
+      const date = o.delivered_at ? toLocalDateStr(o.delivered_at) : null
+      if (fromDate || toDate) {
+        if (!date) continue
+        if (fromDate && date < fromDate) continue
+        if (toDate && date > toDate) continue
+      }
       efectivo += paidWithMethod(o, 'efectivo')
       if (o.status === 'delivered') {
         for (const it of o.items) {
@@ -1036,9 +1041,9 @@ function RepartidoresTab({
           <div>
             <div className="mb-1 flex items-center gap-1.5">
               <span className="text-sm font-medium text-slate-700">
-                Rango de fechas
+                Rango de fechas (de entrega)
               </span>
-              <InfoHint text="Deja ambas para ver todo, o pon la misma fecha en las dos para un solo día." />
+              <InfoHint text="Se filtra por la fecha en que se marcó el pedido como entregado. Deja ambas para ver todo, o pon la misma fecha en las dos para un solo día." />
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <TextInput

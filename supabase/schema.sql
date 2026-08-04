@@ -162,6 +162,13 @@ alter table orders alter column client_id drop not null;
 -- Bidones que el cliente devolvió al momento de la entrega.
 alter table orders add column if not exists returned_bidones integer;
 
+-- Fecha/hora de ENTREGA: se llena al marcar el pedido como entregado. Es la
+-- fecha que usan los reportes por repartidor (no la de creación).
+alter table orders add column if not exists delivered_at timestamptz;
+-- Migración: los pedidos ya entregados sin fecha de entrega toman la de creación.
+update orders set delivered_at = created_at
+  where status = 'delivered' and delivered_at is null;
+
 -- El PAGO ahora es independiente del estado de entrega: un pedido puede estar
 -- pagado sin haber sido entregado (y viceversa). "status" queda sólo para la
 -- entrega ('ordered' | 'delivered'); el valor 'paid' del enum se deja de usar.

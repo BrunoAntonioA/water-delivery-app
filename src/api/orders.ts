@@ -167,6 +167,7 @@ export async function markOrderDelivered(
   const patch: Record<string, unknown> = {
     status: 'delivered',
     returned_bidones: returnedBidones,
+    delivered_at: new Date().toISOString(),
     // Método acordado (o principal si ya pagó con el desglose).
     payment_method: payments?.length ? payments[0].method : paymentMethod,
   }
@@ -183,7 +184,7 @@ export async function markOrderDelivered(
 export async function undeliverOrder(id: string): Promise<void> {
   const { error } = await supabase
     .from('orders')
-    .update({ status: 'ordered', returned_bidones: null })
+    .update({ status: 'ordered', returned_bidones: null, delivered_at: null })
     .eq('id', id)
   if (error) throw error
 }
