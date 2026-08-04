@@ -47,8 +47,11 @@ export function driverLabel(d: Driver): string {
 
 export interface RouteSummary extends Route {
   stopCount: number
-  deliveredCount: number // entregados o pagados
-  paidCount: number
+  orderCount: number // paradas que son pedidos
+  deliveredCount: number // pedidos entregados
+  paidCount: number // pedidos pagados
+  pickupCount: number // paradas que son retiros
+  pickupDoneCount: number // retiros recogidos
   driverName: string | null
 }
 
@@ -76,19 +79,19 @@ export async function listRoutes(): Promise<RouteSummary[]> {
       driver_profile: DriverProfile
     }
     const list = stops ?? []
-    // Una parada está "completada" si el pedido se entregó o si el retiro se
-    // recogió (los retiros no tienen "order" pero cuentan como cumplidos).
+    // Los pedidos y los retiros se cuentan por separado.
     const deliveredCount = list.filter(
-      (s) => (s.order && s.order.status !== 'ordered') || s.pickup?.done
+      (s) => s.order && s.order.status !== 'ordered'
     ).length
-    const paidCount = list.filter(
-      (s) => s.order?.paid || s.pickup?.done
-    ).length
+    const paidCount = list.filter((s) => s.order?.paid).length
     return {
       ...route,
       stopCount: list.length,
+      orderCount: list.filter((s) => s.order).length,
       deliveredCount,
       paidCount,
+      pickupCount: list.filter((s) => s.pickup).length,
+      pickupDoneCount: list.filter((s) => s.pickup?.done).length,
       driverName: driverNameOf(driver_profile, route.driver),
     }
   })

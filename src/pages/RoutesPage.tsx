@@ -174,13 +174,20 @@ export default function RoutesPage() {
                       <CountChip
                         label="Entregados"
                         done={r.deliveredCount}
-                        total={r.stopCount}
+                        total={r.orderCount}
                       />
                       <CountChip
                         label="Pagados"
                         done={r.paidCount}
-                        total={r.stopCount}
+                        total={r.orderCount}
                       />
+                      {r.pickupCount > 0 && (
+                        <CountChip
+                          label="Retirados"
+                          done={r.pickupDoneCount}
+                          total={r.pickupCount}
+                        />
+                      )}
                     </div>
                   </Link>
                   <div className="flex flex-wrap items-center gap-2 sm:shrink-0 sm:justify-end">
@@ -338,19 +345,30 @@ export default function RoutesPage() {
 
 /** Estado general de la ruta según sus pedidos. */
 function RouteStatusBadge({ route }: { route: RouteSummary }) {
-  const { stopCount, deliveredCount, paidCount } = route
+  const {
+    stopCount,
+    orderCount,
+    deliveredCount,
+    paidCount,
+    pickupCount,
+    pickupDoneCount,
+  } = route
+  const pickupsDone = pickupDoneCount === pickupCount
+  const allDelivered = deliveredCount === orderCount && pickupsDone
+  const allPaid =
+    orderCount > 0 && paidCount === orderCount && pickupsDone
   let label: string
   let cls: string
   if (stopCount === 0) {
     label = 'Sin pedidos'
     cls = 'bg-slate-100 text-slate-500'
-  } else if (paidCount === stopCount) {
+  } else if (allPaid) {
     label = 'Todo pagado'
     cls = 'bg-emerald-100 text-emerald-800'
-  } else if (deliveredCount === stopCount) {
+  } else if (allDelivered) {
     label = 'Todo entregado'
     cls = 'bg-sky-100 text-sky-800'
-  } else if (deliveredCount > 0) {
+  } else if (deliveredCount > 0 || pickupDoneCount > 0) {
     label = 'En reparto'
     cls = 'bg-amber-100 text-amber-800'
   } else {
