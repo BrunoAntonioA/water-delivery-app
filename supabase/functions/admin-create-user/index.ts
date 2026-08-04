@@ -98,11 +98,13 @@ Deno.serve(async (req) => {
     if (!companyId) return json({ error: 'Tu cuenta no tiene empresa' }, 403)
   }
 
-  // 5) Crear la cuenta de Auth (email ya confirmado: no requiere signup abierto).
+  // 5) Crear la cuenta de Auth SIN confirmar: el usuario recibe un correo de
+  //    verificación (lo dispara el frontend con auth.resend) y debe confirmarlo
+  //    antes de poder iniciar sesión.
   const { data: created, error: createErr } = await admin.auth.admin.createUser({
     email,
     password,
-    email_confirm: true,
+    email_confirm: false,
   })
   if (createErr || !created.user) {
     const msg = createErr?.message ?? 'No se pudo crear la cuenta'

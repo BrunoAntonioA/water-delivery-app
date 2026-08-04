@@ -158,6 +158,20 @@ export async function createUser(input: NewUserInput): Promise<void> {
     }
     throw new Error(message)
   }
+
+  // La cuenta se creó sin confirmar: se le envía el correo de verificación.
+  // Si el envío falla (p. ej. límite de correos), no se revierte la creación;
+  // el usuario puede pedir el enlace luego. El correo confirma y, al abrirlo,
+  // inicia sesión; la contraseña asignada sirve para los ingresos siguientes.
+  try {
+    await supabase.auth.resend({
+      type: 'signup',
+      email,
+      options: { emailRedirectTo: window.location.origin },
+    })
+  } catch (e) {
+    console.warn('No se pudo enviar el correo de verificación:', e)
+  }
 }
 
 /**
