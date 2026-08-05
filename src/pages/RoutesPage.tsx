@@ -160,8 +160,8 @@ export default function RoutesPage() {
         <Spinner />
       ) : filtered.length === 0 ? (
         <EmptyState>
-          {dateFilter
-            ? 'No hay rutas para ese día.'
+          {dateFrom || dateTo
+            ? 'No hay rutas en esas fechas.'
             : 'Aún no tienes rutas. Crea la primera con “Nueva ruta”.'}
         </EmptyState>
       ) : (
