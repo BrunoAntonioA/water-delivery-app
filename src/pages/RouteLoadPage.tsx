@@ -105,8 +105,8 @@ export default function RouteLoadPage() {
         supplies={supplies ?? []}
         soldBySupply={soldBySupply}
         onSaved={onSaved}
-        startEditing={!route.load_confirmed}
-        canEdit
+        startEditing={!route.load_confirmed && !route.closed_at}
+        canEdit={!(isRepartidor && Boolean(route.closed_at))}
         addOnly={isRepartidor}
       />
     </div>

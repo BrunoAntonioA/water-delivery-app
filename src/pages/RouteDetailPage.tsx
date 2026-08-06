@@ -71,7 +71,9 @@ import {
 const StopExtrasContext = createContext<{
   supplyName: Map<string, string>
   onPickupDone: (pickupId: string, done: boolean) => void
-}>({ supplyName: new Map(), onPickupDone: () => {} })
+  // true = sólo lectura (p. ej. repartidor en una ruta cerrada): sin acciones.
+  readOnly: boolean
+}>({ supplyName: new Map(), onPickupDone: () => {}, readOnly: false })
 
 /** Texto de los insumos de un retiro: "3× Bidón 20L, 2× ...". */
 function pickupItemsText(
@@ -312,6 +314,9 @@ export default function RouteDetailPage() {
 
   // Al repartidor se le ocultan los pedidos hasta registrar la carga inicial.
   const loadBlocked = isRepartidor && !route?.load_confirmed
+  // Ruta cerrada: el repartidor la ve en sólo lectura (sin ninguna acción). El
+  // admin sí puede seguir gestionándola.
+  const readOnly = isRepartidor && Boolean(route?.closed_at)
 
   function onDragEnd(event: DragEndEvent) {
     const { active, over } = event
@@ -361,6 +366,13 @@ export default function RouteDetailPage() {
             <span aria-hidden>🚚</span>
             <span>{route.driverName || 'Sin repartidor'}</span>
           </p>
+          {route.closed_at && (
+            <p className="mt-1 flex items-center gap-2 text-sm font-medium text-slate-600">
+              <span className="rounded-full bg-slate-700 px-2 py-0.5 text-xs font-semibold text-white">
+                Cerrada
+              </span>
+            </p>
+          )}
           {route.notes && (
             <p className="mt-1 text-sm italic text-slate-500">
               “{route.notes}”
@@ -373,7 +385,7 @@ export default function RouteDetailPage() {
               🛒 Ver carga
             </Button>
           </Link>
-          {!loadBlocked && (
+          {!loadBlocked && !readOnly && (
             <>
               <Button
                 variant="success"
@@ -432,6 +444,7 @@ export default function RouteDetailPage() {
             supplyName,
             onPickupDone: (pickupId, done) =>
               pickupDoneMutation.mutate({ pickupId, done }),
+            readOnly,
           }}
         >
         <div className="space-y-8">
@@ -446,6 +459,56 @@ export default function RouteDetailPage() {
             </h2>
             {pending.length === 0 ? (
               <EmptyState>¡Todo entregado! No quedan pedidos pendientes.</EmptyState>
+            ) : readOnly ? (
+              // Ruta cerrada (repartidor): sólo lectura, sin arrastrar.
+              isMobile ? (
+                <div className="space-y-2">
+                  {pending.map((stop, index) => (
+                    <StopCardInner
+                      key={stop.id}
+                      stop={stop}
+                      canManage={canManage}
+                      onChanged={invalidateRoute}
+                      onRemove={() => {}}
+                      orderNo={index + 1}
+                      leading={
+                        <span className="text-lg leading-none text-slate-300">
+                          🔒
+                        </span>
+                      }
+                    />
+                  ))}
+                </div>
+              ) : (
+                <Card className="overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <StopsTableHead sortable />
+                      <tbody>
+                        {pending.map((stop, index) => (
+                          <tr
+                            key={stop.id}
+                            className="border-b border-slate-100 bg-white [&>td]:align-middle"
+                          >
+                            <td className="px-2 py-2 text-center text-slate-300">
+                              🔒
+                            </td>
+                            <td className="px-2 py-2 font-semibold text-slate-500">
+                              {index + 1}
+                            </td>
+                            <StopCells
+                              stop={stop}
+                              canManage={canManage}
+                              onChanged={invalidateRoute}
+                              onRemove={() => {}}
+                            />
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </Card>
+              )
             ) : (
               <DndContext
                 sensors={sensors}
@@ -501,7 +564,7 @@ export default function RouteDetailPage() {
                 </SortableContext>
               </DndContext>
             )}
-            {pending.length > 0 && (
+            {pending.length > 0 && !readOnly && (
               <p className="mt-2 text-xs text-slate-400">
                 Arrastra las tarjetas desde el asa de la izquierda para cambiar
                 el orden de entrega.
@@ -901,7 +964,7 @@ function StopCells({
   onRemove: () => void
   showReturned?: boolean
 }) {
-  const { supplyName, onPickupDone } = useContext(StopExtrasContext)
+  const { supplyName, onPickupDone, readOnly } = useContext(StopExtrasContext)
   const order = stop.order
   const pickup = stop.pickup
 
@@ -964,12 +1027,14 @@ function StopCells({
           <td className="px-3 py-2 text-center text-slate-400">—</td>
         )}
         <td className="px-3 py-2">
-          <Button
-            variant={pickup.done ? 'secondary' : 'success'}
-            onClick={() => onPickupDone(pickup.id, !pickup.done)}
-          >
-            {pickup.done ? 'Deshacer' : 'Recogido'}
-          </Button>
+          {!readOnly && (
+            <Button
+              variant={pickup.done ? 'secondary' : 'success'}
+              onClick={() => onPickupDone(pickup.id, !pickup.done)}
+            >
+              {pickup.done ? 'Deshacer' : 'Recogido'}
+            </Button>
+          )}
         </td>
         <td className="px-2 py-2 text-center">
           {canManage && (
@@ -1057,7 +1122,7 @@ function StopCells({
         </td>
       )}
       <td className="px-3 py-2">
-        {order && (
+        {order && !readOnly && (
           <OrderActions
             order={order}
             onChanged={onChanged}
@@ -1176,7 +1241,7 @@ function StopCardInner({
   leading: React.ReactNode
   orderNo?: number
 }) {
-  const { supplyName, onPickupDone } = useContext(StopExtrasContext)
+  const { supplyName, onPickupDone, readOnly } = useContext(StopExtrasContext)
   const order = stop.order
   const pickup = stop.pickup
 
@@ -1237,14 +1302,16 @@ function StopCardInner({
             </button>
           )}
         </div>
-        <div className="mt-2 border-t border-slate-100 pt-2">
-          <Button
-            variant={pickup.done ? 'secondary' : 'success'}
-            onClick={() => onPickupDone(pickup.id, !pickup.done)}
-          >
-            {pickup.done ? 'Deshacer retiro' : 'Marcar recogido'}
-          </Button>
-        </div>
+        {!readOnly && (
+          <div className="mt-2 border-t border-slate-100 pt-2">
+            <Button
+              variant={pickup.done ? 'secondary' : 'success'}
+              onClick={() => onPickupDone(pickup.id, !pickup.done)}
+            >
+              {pickup.done ? 'Deshacer retiro' : 'Marcar recogido'}
+            </Button>
+          </div>
+        )}
       </div>
     )
   }
@@ -1322,7 +1389,7 @@ function StopCardInner({
         <p className="font-bold text-slate-900">
           {order ? formatMoney(order.total) : '—'}
         </p>
-        {order && (
+        {order && !readOnly && (
           <OrderActions
             order={order}
             onChanged={onChanged}
