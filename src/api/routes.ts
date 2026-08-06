@@ -1,5 +1,11 @@
 import { supabase } from '../lib/supabase'
-import type { OrderDetail, OrderStatus, Route, RouteDetail } from '../types/db'
+import type {
+  Client,
+  OrderDetail,
+  OrderStatus,
+  Route,
+  RouteDetail,
+} from '../types/db'
 
 const ORDER_SELECT =
   'order:orders(*, client:clients(*), address:addresses(*), items:order_items(*, product:products(*)))'
@@ -215,6 +221,22 @@ export async function removeStop(stopId: string): Promise<void> {
   if (error) throw error
 }
 
+/**
+ * Cierra una ruta. Los pendientes (pedidos sin entregar / retiros sin recoger)
+ * se mueven a `targetRouteId` si se indica; si no, se desasignan. Los entregados
+ * quedan como historial en la ruta cerrada.
+ */
+export async function closeRoute(
+  routeId: string,
+  targetRouteId: string | null
+): Promise<void> {
+  const { error } = await supabase.rpc('close_route', {
+    p_route_id: routeId,
+    p_target_route_id: targetRouteId,
+  })
+  if (error) throw error
+}
+
 export interface RouteLoadInput {
   supply_id: string
   quantity: number
@@ -280,9 +302,84 @@ export async function addRoutePickup(
   return data as string
 }
 
-/** Elimina un retiro (y su parada, por el on delete cascade). */
-export async function removeRoutePickup(id: string): Promise<void> {
+/** Elimina un retiro DEFINITIVAMENTE (y su parada, por el on delete cascade). */
+export async function deleteRoutePickup(id: string): Promise<void> {
   const { error } = await supabase.from('route_pickups').delete().eq('id', id)
+  if (error) throw error
+}
+
+/**
+ * Quita un retiro de su ruta SIN eliminarlo: borra su parada y lo deja
+ * PENDIENTE (route_id null, done false) para poder reasignarlo a otra ruta.
+ */
+export async function unassignRoutePickup(pickupId: string): Promise<void> {
+  const { error: stopErr } = await supabase
+    .from('route_stops')
+    .delete()
+    .eq('pickup_id', pickupId)
+  if (stopErr) throw stopErr
+  const { error } = await supabase
+    .from('route_pickups')
+    .update({ route_id: null, done: false })
+    .eq('id', pickupId)
+  if (error) throw error
+}
+
+export interface PendingPickup {
+  id: string
+  customer_name: string | null
+  address: string | null
+  items: { supply_id: string; quantity: number }[]
+  client: Client | null
+}
+
+/** Retiros PENDIENTES: los que no están asignados a ninguna ruta (sin parada). */
+export async function listPendingPickups(): Promise<PendingPickup[]> {
+  const { data: stops, error: stopsErr } = await supabase
+    .from('route_stops')
+    .select('pickup_id')
+    .not('pickup_id', 'is', null)
+  if (stopsErr) throw stopsErr
+  const assigned = new Set((stops ?? []).map((s) => s.pickup_id as string))
+
+  const { data, error } = await supabase
+    .from('route_pickups')
+    .select('id, customer_name, address, items, client:clients(*)')
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  type Row = Omit<PendingPickup, 'client'> & {
+    client: Client | Client[] | null
+  }
+  return ((data ?? []) as unknown as Row[])
+    .filter((p) => !assigned.has(p.id))
+    .map((p) => ({
+      ...p,
+      client: Array.isArray(p.client) ? (p.client[0] ?? null) : p.client,
+    }))
+}
+
+/** Asigna un retiro pendiente a una ruta (crea su parada al final). */
+export async function addPickupToRoute(
+  routeId: string,
+  pickupId: string
+): Promise<void> {
+  const { count, error: countError } = await supabase
+    .from('route_stops')
+    .select('id', { count: 'exact', head: true })
+    .eq('route_id', routeId)
+  if (countError) throw countError
+
+  const { error: stopErr } = await supabase.from('route_stops').insert({
+    route_id: routeId,
+    pickup_id: pickupId,
+    position: count ?? 0,
+  })
+  if (stopErr) throw stopErr
+
+  const { error } = await supabase
+    .from('route_pickups')
+    .update({ route_id: routeId })
+    .eq('id', pickupId)
   if (error) throw error
 }
 

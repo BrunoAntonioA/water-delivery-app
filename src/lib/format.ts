@@ -29,6 +29,13 @@ export function formatTimePart(iso: string): string {
   )
 }
 
+/** Fecha corta (media, sin hora) a partir de "YYYY-MM-DD", sin corrimiento de zona. */
+export function formatDateShort(dateStr: string): string {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const date = new Date(y, (m ?? 1) - 1, d ?? 1)
+  return new Intl.DateTimeFormat(LOCALE, { dateStyle: 'medium' }).format(date)
+}
+
 /** Para fechas sin hora ("YYYY-MM-DD"), evitando corrimientos de zona horaria. */
 export function formatDateOnly(dateStr: string): string {
   const [y, m, d] = dateStr.split('-').map(Number)

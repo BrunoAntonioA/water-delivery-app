@@ -295,7 +295,7 @@ export default function CostsPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase text-slate-500">
+                  <tr className="border-b border-slate-200 bg-slate-50 text-center text-xs uppercase text-slate-500">
                     <th className="px-3 py-2">Fecha</th>
                     <th className="px-3 py-2">Nombre</th>
                     <th className="px-3 py-2">Categoría</th>
@@ -303,7 +303,7 @@ export default function CostsPage() {
                       <th className="px-3 py-2">Agregado por</th>
                     )}
                     <th className="px-3 py-2">Descripción</th>
-                    <th className="px-3 py-2 text-right">Monto</th>
+                    <th className="px-3 py-2">Monto</th>
                     <th className="w-px px-3 py-2"></th>
                   </tr>
                 </thead>
@@ -311,7 +311,7 @@ export default function CostsPage() {
                   {pageItems.map((c) => (
                     <tr
                       key={c.id}
-                      className="border-b border-slate-100 last:border-0 [&>td]:align-middle"
+                      className="border-b border-slate-100 last:border-0 [&>td]:align-middle [&>td]:text-center"
                     >
                       <td className="whitespace-nowrap px-3 py-2 text-slate-500">
                         {shortDate(c.issue_date)}
@@ -330,11 +330,11 @@ export default function CostsPage() {
                       <td className="px-3 py-2 text-slate-500">
                         {c.description || '—'}
                       </td>
-                      <td className="whitespace-nowrap px-3 py-2 text-right font-medium text-slate-800">
+                      <td className="whitespace-nowrap px-3 py-2 font-medium text-slate-800">
                         {formatMoney(c.amount)}
                       </td>
                       <td className="px-2 py-2">
-                        <div className="flex justify-end gap-1">
+                        <div className="flex justify-center gap-1">
                           <Button
                             variant="secondary"
                             onClick={() => openEdit(c)}

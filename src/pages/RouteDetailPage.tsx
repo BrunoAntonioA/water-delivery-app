@@ -20,14 +20,17 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
   addOrderToRoute,
+  addPickupToRoute,
   addQuickSale,
   addRoutePickup,
   getRoute,
   listAssignableOrders,
-  removeRoutePickup,
+  listPendingPickups,
   removeStop,
   reorderStops,
   setRoutePickupDone,
+  unassignRoutePickup,
+  type PendingPickup,
 } from '../api/routes'
 import { listProducts } from '../api/products'
 import { listSupplies } from '../api/supplies'
@@ -115,6 +118,12 @@ export default function RouteDetailPage() {
     enabled: canManage,
   })
 
+  const { data: pendingPickups } = useQuery({
+    queryKey: ['pending-pickups'],
+    queryFn: listPendingPickups,
+    enabled: canManage,
+  })
+
   const { data: products } = useQuery({
     queryKey: ['products'],
     queryFn: listProducts,
@@ -177,6 +186,7 @@ export default function RouteDetailPage() {
   }, [route?.stops])
 
   const [addOpen, setAddOpen] = useState(false)
+  const [pendingPickupsOpen, setPendingPickupsOpen] = useState(false)
 
   // Venta rápida (sólo nombre + productos).
   const [quickOpen, setQuickOpen] = useState(false)
@@ -202,6 +212,7 @@ export default function RouteDetailPage() {
   const invalidateRoute = () => {
     qc.invalidateQueries({ queryKey: ['route', id] })
     qc.invalidateQueries({ queryKey: ['assignable-orders'] })
+    qc.invalidateQueries({ queryKey: ['pending-pickups'] })
     qc.invalidateQueries({ queryKey: ['routes'] })
   }
 
@@ -240,8 +251,16 @@ export default function RouteDetailPage() {
     },
   })
 
+  // "Quitar de la ruta" un retiro NO lo elimina: lo deja pendiente para
+  // reasignarlo a otra ruta más tarde.
   const removePickupMutation = useMutation({
-    mutationFn: (pickupId: string) => removeRoutePickup(pickupId),
+    mutationFn: (pickupId: string) => unassignRoutePickup(pickupId),
+    onSuccess: invalidateRoute,
+  })
+
+  // Agregar un retiro PENDIENTE (ya existente) a esta ruta.
+  const addExistingPickupMutation = useMutation({
+    mutationFn: (pickupId: string) => addPickupToRoute(id, pickupId),
     onSuccess: invalidateRoute,
   })
 
@@ -370,6 +389,15 @@ export default function RouteDetailPage() {
               >
                 🔄 Retiro
               </Button>
+              {canManage && (pendingPickups?.length ?? 0) > 0 && (
+                <Button
+                  variant="secondary"
+                  onClick={() => setPendingPickupsOpen(true)}
+                  className="flex-1 sm:flex-none"
+                >
+                  📋 Retiros pendientes ({pendingPickups?.length ?? 0})
+                </Button>
+              )}
             </>
           )}
           {canManage && (
@@ -547,6 +575,21 @@ export default function RouteDetailPage() {
           orders={assignable ?? []}
           onAdd={(orderId) => addMutation.mutate(orderId)}
           isPending={addMutation.isPending}
+        />
+      </Modal>
+
+      {/* --- Retiros pendientes (retiros sin ruta, para reasignar) --- */}
+      <Modal
+        open={pendingPickupsOpen}
+        onClose={() => setPendingPickupsOpen(false)}
+        title="Retiros pendientes"
+        wide
+      >
+        <PendingPickupList
+          pickups={pendingPickups ?? []}
+          supplyName={supplyName}
+          onAdd={(pickupId) => addExistingPickupMutation.mutate(pickupId)}
+          isPending={addExistingPickupMutation.isPending}
         />
       </Modal>
 
@@ -1393,8 +1436,13 @@ function AddOrderList({
           className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2"
         >
           <div className="min-w-0">
-            <p className="font-medium text-slate-800">
-              {o.client ? `${o.client.name} ${o.client.surname}` : 'Cliente'}
+            <p className="flex items-center gap-2 font-medium text-slate-800">
+              <span className="truncate">{orderClientName(o)}</span>
+              {!o.client_id && (
+                <span className="shrink-0 rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-800">
+                  Venta rápida
+                </span>
+              )}
             </p>
             <p className="truncate text-sm text-slate-500">
               {o.address
@@ -1408,6 +1456,58 @@ function AddOrderList({
           <Button
             variant="secondary"
             onClick={() => onAdd(o.id)}
+            disabled={isPending}
+          >
+            Agregar
+          </Button>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function PendingPickupList({
+  pickups,
+  supplyName,
+  onAdd,
+  isPending,
+}: {
+  pickups: PendingPickup[]
+  supplyName: Map<string, string>
+  onAdd: (pickupId: string) => void
+  isPending: boolean
+}) {
+  if (pickups.length === 0) {
+    return (
+      <p className="py-6 text-center text-sm text-slate-500">
+        No hay retiros pendientes. Los retiros que quites de una ruta aparecerán
+        aquí para reasignarlos.
+      </p>
+    )
+  }
+
+  return (
+    <div className="max-h-96 space-y-2 overflow-y-auto">
+      {pickups.map((p) => (
+        <div
+          key={p.id}
+          className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2"
+        >
+          <div className="min-w-0">
+            <p className="flex items-center gap-2 font-medium text-slate-800">
+              <span className="truncate">{p.customer_name || 'Retiro'}</span>
+              <span className="shrink-0 rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-800">
+                Retiro
+              </span>
+            </p>
+            <p className="truncate text-sm text-slate-500">
+              {pickupItemsText(p, supplyName)}
+              {p.address ? ` · ${p.address}` : ''}
+            </p>
+          </div>
+          <Button
+            variant="secondary"
+            onClick={() => onAdd(p.id)}
             disabled={isPending}
           >
             Agregar

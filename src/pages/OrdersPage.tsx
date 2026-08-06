@@ -13,6 +13,7 @@ import type { OrderDetail, OrderStatus, PaymentMethod } from '../types/db'
 import {
   formatDate,
   formatDatePart,
+  formatDateShort,
   formatMoney,
   formatTimePart,
   toLocalDateStr,
@@ -108,6 +109,7 @@ export default function OrdersPage() {
     'all'
   )
   const [filterClientId, setFilterClientId] = useState('')
+  const [nameSearch, setNameSearch] = useState('')
   const [page, setPage] = useState(1)
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['orders'] })
@@ -118,6 +120,11 @@ export default function OrdersPage() {
       if (dateFrom && d < dateFrom) return false
       if (dateTo && d > dateTo) return false
       if (filterClientId && o.client_id !== filterClientId) return false
+      if (
+        nameSearch &&
+        !orderClientName(o).toLowerCase().includes(nameSearch.trim().toLowerCase())
+      )
+        return false
       if (paymentFilter !== 'all' && o.payment_method !== paymentFilter)
         return false
       if (paidFilter === 'paid' && !o.paid) return false
@@ -133,12 +140,14 @@ export default function OrdersPage() {
     paidFilter,
     paymentFilter,
     filterClientId,
+    nameSearch,
   ])
 
   const hasFilters = Boolean(
     dateFrom ||
       dateTo ||
       filterClientId ||
+      nameSearch ||
       statusFilter !== 'all' ||
       paidFilter !== 'all' ||
       paymentFilter !== 'all'
@@ -147,6 +156,7 @@ export default function OrdersPage() {
     setDateFrom('')
     setDateTo('')
     setFilterClientId('')
+    setNameSearch('')
     setStatusFilter('all')
     setPaidFilter('all')
     setPaymentFilter('all')
@@ -313,9 +323,21 @@ export default function OrdersPage() {
       {!isLoading && orders && orders.length > 0 && (
         <>
           <Card className="mb-4 p-4">
+            <div className="mb-4">
+              <Label>Buscar por nombre</Label>
+              <TextInput
+                value={nameSearch}
+                onChange={(e) => {
+                  setNameSearch(e.target.value)
+                  setPage(1)
+                }}
+                placeholder="Nombre del cliente o de la venta rápida…"
+                className="w-full sm:max-w-sm"
+              />
+            </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <Label>Cliente</Label>
+                <Label>Cliente registrado</Label>
                 <ClientCombobox
                   clients={clients ?? []}
                   value={filterClientId}
@@ -449,12 +471,22 @@ export default function OrdersPage() {
                       <span className="font-semibold text-slate-900">
                         {orderClientName(o)}
                       </span>
+                      {!o.client_id && (
+                        <span className="rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-800">
+                          Venta rápida
+                        </span>
+                      )}
                       <StatusBadge status={o.status} />
                       <PaidBadge paid={o.paid} />
                     </div>
                     <p className="text-xs text-slate-400">
                       {formatDate(o.created_at)}
                     </p>
+                    {o.routeDate && (
+                      <p className="text-xs text-slate-500">
+                        🚚 Ruta de entrega: {formatDateShort(o.routeDate)}
+                      </p>
+                    )}
                     <ul className="mt-2 space-y-0.5 text-sm text-slate-600">
                       {o.items.map((it) => (
                         <li key={it.id}>
@@ -576,7 +608,7 @@ export default function OrdersPage() {
                 <thead>
                   <tr className="border-b border-slate-200 bg-slate-50 text-center text-xs uppercase text-slate-500">
                     <th className="px-3 py-2">Cliente</th>
-                    <th className="w-16 px-2 py-2">Fecha de creación</th>
+                    <th className="w-16 px-2 py-2">Fecha de ruta de entrega</th>
                     <th className="px-3 py-2">Productos</th>
                     <th className="px-3 py-2">Dirección</th>
                     <th className="px-3 py-2">Teléfono</th>
@@ -584,6 +616,7 @@ export default function OrdersPage() {
                     <th className="px-3 py-2">Estado</th>
                     <th className="px-3 py-2">Método</th>
                     <th className="px-3 py-2 text-center">Devueltos</th>
+                    <th className="w-16 px-2 py-2">Fecha de creación</th>
                     <th className="px-3 py-2">Acciones</th>
                     <th className="w-10 px-2 py-2"></th>
                   </tr>
@@ -939,14 +972,18 @@ function OrderRow({
     : ''
   return (
     <tr className="border-b border-slate-100 last:border-0 [&>td]:align-middle [&>td]:text-center">
-      <td className="px-3 py-2 font-medium text-slate-800">{clientName}</td>
-      <td className="w-16 whitespace-nowrap px-2 py-2 text-center text-slate-600">
-        <div className="leading-tight">
-          <div>{formatDatePart(o.created_at)}</div>
-          <div className="text-xs text-slate-400">
-            {formatTimePart(o.created_at)}
-          </div>
+      <td className="px-3 py-2 font-medium text-slate-800">
+        <div className="flex flex-col items-center gap-1">
+          <span>{clientName}</span>
+          {!o.client_id && (
+            <span className="rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-800">
+              Venta rápida
+            </span>
+          )}
         </div>
+      </td>
+      <td className="w-16 whitespace-nowrap px-2 py-2 text-center text-slate-600">
+        {o.routeDate ? formatDateShort(o.routeDate) : '—'}
       </td>
       <td className="px-3 py-2 text-slate-600">
         <OrderItemsList items={o.items} />
@@ -989,6 +1026,14 @@ function OrderRow({
       </td>
       <td className="px-3 py-2 text-center tabular-nums text-slate-700">
         {returnedBidonesText(o)}
+      </td>
+      <td className="w-16 whitespace-nowrap px-2 py-2 text-center text-slate-600">
+        <div className="leading-tight">
+          <div>{formatDatePart(o.created_at)}</div>
+          <div className="text-xs text-slate-400">
+            {formatTimePart(o.created_at)}
+          </div>
+        </div>
       </td>
       <td className="px-3 py-2">
         <OrderActions

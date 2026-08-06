@@ -282,9 +282,32 @@ alter table route_pickups add column if not exists client_id uuid references cli
 alter table route_stops alter column order_id drop not null;
 alter table route_stops add column if not exists pickup_id uuid references route_pickups (id) on delete cascade;
 
+-- Los retiros dejan de estar atados a una ruta: pueden quedar PENDIENTES (sin
+-- ruta) y reasignarse a otra. route_id pasa a ser opcional y, si se elimina la
+-- ruta, el retiro SOBREVIVE (route_id -> null) en vez de borrarse. La asignación
+-- real a una ruta se maneja por route_stops.pickup_id (igual que los pedidos).
+do $$
+declare c record;
+begin
+  for c in
+    select conname from pg_constraint
+    where conrelid = 'public.route_pickups'::regclass and contype = 'f'
+      and pg_get_constraintdef(oid) ilike '%references routes%'
+  loop
+    execute format('alter table route_pickups drop constraint %I', c.conname);
+  end loop;
+end$$;
+alter table route_pickups alter column route_id drop not null;
+alter table route_pickups
+  add constraint route_pickups_route_id_fkey
+  foreign key (route_id) references routes (id) on delete set null;
+
 -- Bandera: la carga inicial ya fue registrada. Hasta entonces, al repartidor se
 -- le ocultan los pedidos (debe registrar qué cargó primero).
 alter table routes add column if not exists load_confirmed boolean not null default false;
+-- Cierre de ruta: fecha/hora en que se cerró (null = abierta). Una ruta cerrada
+-- ya no admite cambios de pedidos y muestra el estado "Cerrada".
+alter table routes add column if not exists closed_at timestamptz;
 
 -- ============================================================================
 --  MULTI-EMPRESA (multi-tenant): empresas, usuarios y aislamiento de datos
@@ -613,6 +636,67 @@ begin
 end$$;
 
 grant execute on function public.add_route_pickup(uuid, text, text, jsonb, uuid) to authenticated;
+
+-- Cerrar una ruta. Los pedidos NO entregados y los retiros NO recogidos son
+-- "pendientes"; los entregados/recogidos quedan como historial en la ruta.
+--  - p_target_route_id no nulo: mueve los pendientes a esa ruta.
+--  - p_target_route_id nulo: desasigna los pendientes (los pedidos quedan sin
+--    ruta y los retiros quedan pendientes para reasignar).
+-- Luego marca la ruta como cerrada (closed_at = now()).
+create or replace function public.close_route(
+  p_route_id uuid,
+  p_target_route_id uuid default null
+) returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  v_company uuid;
+  v_pos     int := 0;
+  r         record;
+begin
+  select company_id into v_company from routes where id = p_route_id;
+  if v_company is null then raise exception 'Ruta no encontrada'; end if;
+  if v_company <> current_company_id() then raise exception 'No autorizado'; end if;
+
+  if p_target_route_id is not null then
+    if not exists (
+      select 1 from routes where id = p_target_route_id and company_id = v_company
+    ) then
+      raise exception 'Ruta destino inválida';
+    end if;
+    select count(*) into v_pos from route_stops where route_id = p_target_route_id;
+  end if;
+
+  for r in
+    select rs.id as stop_id, rs.order_id, rs.pickup_id
+    from route_stops rs
+    left join orders o        on o.id = rs.order_id
+    left join route_pickups p on p.id = rs.pickup_id
+    where rs.route_id = p_route_id
+      and (
+        (rs.order_id is not null and o.status = 'ordered')
+        or (rs.pickup_id is not null and p.done = false)
+      )
+  loop
+    if p_target_route_id is not null then
+      update route_stops
+        set route_id = p_target_route_id, position = v_pos
+        where id = r.stop_id;
+      v_pos := v_pos + 1;
+      if r.pickup_id is not null then
+        update route_pickups set route_id = p_target_route_id where id = r.pickup_id;
+      end if;
+    else
+      delete from route_stops where id = r.stop_id;
+      if r.pickup_id is not null then
+        update route_pickups set route_id = null, done = false where id = r.pickup_id;
+      end if;
+    end if;
+  end loop;
+
+  update routes set closed_at = now() where id = p_route_id;
+end$$;
+
+grant execute on function public.close_route(uuid, uuid) to authenticated;
 
 -- ----------------------------------------------------------------------------
 --  Resumen de entregas por repartidor: cantidad entregada de cada producto en

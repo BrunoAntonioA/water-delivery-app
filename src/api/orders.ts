@@ -27,13 +27,14 @@ export async function listOrders(): Promise<OrderDetail[]> {
   const { data, error } = await supabase
     .from('orders')
     .select(
-      '*, client:clients(*), address:addresses(*), items:order_items(*, product:products(*)), stops:route_stops(route:routes(driver_id, driver_profile:profiles!driver_id(full_name, email)))'
+      '*, client:clients(*), address:addresses(*), items:order_items(*, product:products(*)), stops:route_stops(route:routes(driver_id, route_date, driver_profile:profiles!driver_id(full_name, email)))'
     )
     .order('created_at', { ascending: false })
   if (error) throw error
   type Stop = {
     route: {
       driver_id: string | null
+      route_date: string | null
       driver_profile: { full_name: string | null; email: string | null } | null
     } | null
   }
@@ -48,6 +49,7 @@ export async function listOrders(): Promise<OrderDetail[]> {
       ...o,
       driverId: route?.driver_id ?? null,
       driverName: dp?.full_name || dp?.email || null,
+      routeDate: route?.route_date ?? null,
     }
   })
 }

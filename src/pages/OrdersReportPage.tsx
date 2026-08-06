@@ -20,7 +20,12 @@ import type {
   Product,
   Supply,
 } from '../types/db'
-import { formatDate, formatMoney, toLocalDateStr } from '../lib/format'
+import {
+  formatDatePart,
+  formatDateShort,
+  formatMoney,
+  toLocalDateStr,
+} from '../lib/format'
 import { orderClientName, orderPaymentList, paidWithMethod } from '../lib/order'
 import { ClientCombobox } from '../components/ClientCombobox'
 import {
@@ -183,7 +188,8 @@ export default function OrdersReportPage() {
     addReportTable(
       r,
       [
-        'Fecha',
+        'Fecha de creación',
+        'Fecha de ruta de entrega',
         'Cliente',
         'Repartidor',
         'Teléfono',
@@ -194,7 +200,8 @@ export default function OrdersReportPage() {
         'Pago',
       ],
       filtered.map((o) => [
-        formatDate(o.created_at),
+        formatDatePart(o.created_at),
+        o.routeDate ? formatDateShort(o.routeDate) : '—',
         orderClientName(o),
         o.driverName ?? '',
         o.client?.phone ?? '',
@@ -434,12 +441,13 @@ export default function OrdersReportPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase text-slate-500">
-                    <th className="px-3 py-2">Fecha</th>
+                  <tr className="border-b border-slate-200 bg-slate-50 text-center text-xs uppercase text-slate-500">
+                    <th className="px-3 py-2">Fecha de creación</th>
+                    <th className="px-3 py-2">Fecha de ruta de entrega</th>
                     <th className="px-3 py-2">Cliente</th>
                     <th className="px-3 py-2">Repartidor</th>
-                    <th className="px-3 py-2 text-center">Ítems</th>
-                    <th className="px-3 py-2 text-right">Total</th>
+                    <th className="px-3 py-2">Ítems</th>
+                    <th className="px-3 py-2">Total</th>
                     <th className="px-3 py-2">Estado</th>
                     <th className="px-3 py-2">Pago</th>
                   </tr>
@@ -453,10 +461,13 @@ export default function OrdersReportPage() {
                     return (
                       <tr
                         key={o.id}
-                        className="border-b border-slate-100 last:border-0"
+                        className="border-b border-slate-100 last:border-0 [&>td]:text-center"
                       >
                         <td className="whitespace-nowrap px-3 py-2 text-slate-500">
-                          {formatDate(o.created_at)}
+                          {formatDatePart(o.created_at)}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2 text-slate-500">
+                          {o.routeDate ? formatDateShort(o.routeDate) : '—'}
                         </td>
                         <td className="px-3 py-2 font-medium text-slate-800">
                           {orderClientName(o)}
@@ -464,14 +475,14 @@ export default function OrdersReportPage() {
                         <td className="px-3 py-2 text-slate-600">
                           {o.driverName ?? '—'}
                         </td>
-                        <td className="px-3 py-2 text-center text-slate-600">
-                          {itemCount}
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-2 text-right font-medium text-slate-800">
+                        <td className="px-3 py-2 text-slate-600">{itemCount}</td>
+                        <td className="whitespace-nowrap px-3 py-2 font-medium text-slate-800">
                           {formatMoney(o.total)}
                         </td>
                         <td className="px-3 py-2">
-                          <StatusBadge status={o.status} />
+                          <div className="flex justify-center">
+                            <StatusBadge status={o.status} />
+                          </div>
                         </td>
                         <td className="whitespace-nowrap px-3 py-2 text-slate-600">
                           {o.paid
@@ -516,6 +527,8 @@ function CashFlowTab({
 }) {
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
+  // Mostrar los pedidos aún NO pagados (por cobrar). Apagado por defecto.
+  const [showUnpaid, setShowUnpaid] = useState(false)
 
   const income = useMemo(() => {
     let efectivo = 0
@@ -564,6 +577,27 @@ function CashFlowTab({
 
   const balance = income.total - expense.total
 
+  // Pedidos aún no pagados (por cobrar) dentro del rango, por fecha de creación.
+  const unpaid = useMemo(() => {
+    const rows: { id: string; date: string; name: string; total: number }[] = []
+    let total = 0
+    for (const o of orders) {
+      if (o.paid) continue
+      const date = toLocalDateStr(o.created_at)
+      if (fromDate && date < fromDate) continue
+      if (toDate && date > toDate) continue
+      rows.push({
+        id: o.id,
+        date,
+        name: orderClientName(o),
+        total: Number(o.total),
+      })
+      total += Number(o.total)
+    }
+    rows.sort((a, b) => a.date.localeCompare(b.date))
+    return { rows, total }
+  }, [orders, fromDate, toDate])
+
   function exportPdf() {
     const periodo =
       fromDate || toDate
@@ -581,6 +615,9 @@ function CashFlowTab({
         ['Ingresos', formatMoney(income.total)],
         ['Egresos (costos)', formatMoney(expense.total)],
         ['Balance', formatMoney(balance)],
+        ...(showUnpaid
+          ? [['Por cobrar (no pagado)', formatMoney(unpaid.total)]]
+          : []),
       ],
       { title: 'Resumen' }
     )
@@ -642,10 +679,22 @@ function CashFlowTab({
       { title: 'Detalle por fecha' }
     )
 
+    if (showUnpaid && unpaid.rows.length > 0) {
+      addReportTable(
+        r,
+        ['Fecha', 'Cliente', 'Monto'],
+        unpaid.rows.map((x) => [short(x.date), x.name, formatMoney(x.total)]),
+        { title: 'Pedidos por cobrar' }
+      )
+    }
+
     saveReport(r, 'flujo-de-caja.pdf')
   }
 
-  const hasData = income.total > 0 || expense.total > 0
+  const hasData =
+    income.total > 0 ||
+    expense.total > 0 ||
+    (showUnpaid && unpaid.total > 0)
 
   // Registra el exportador para el botón del encabezado.
   const exportRef = useRef(exportPdf)
@@ -680,10 +729,33 @@ function CashFlowTab({
             Limpiar
           </Button>
         )}
+
+        <label className="mt-3 flex cursor-pointer items-center gap-2 border-t border-slate-100 pt-3 text-sm text-slate-700">
+          <button
+            type="button"
+            role="switch"
+            aria-checked={showUnpaid}
+            onClick={() => setShowUnpaid((v) => !v)}
+            className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
+              showUnpaid ? 'bg-amber-500' : 'bg-slate-300'
+            }`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                showUnpaid ? 'translate-x-4' : 'translate-x-0.5'
+              }`}
+            />
+          </button>
+          <span>Mostrar pedidos por cobrar (no pagados)</span>
+        </label>
       </Card>
 
       {/* KPIs */}
-      <div className="mb-4 grid gap-3 sm:grid-cols-3">
+      <div
+        className={`mb-4 grid gap-3 sm:grid-cols-2 ${
+          showUnpaid ? 'lg:grid-cols-4' : 'lg:grid-cols-3'
+        }`}
+      >
         <KpiCard
           label="Ingresos"
           value={income.total}
@@ -702,6 +774,14 @@ function CashFlowTab({
           tone={balance >= 0 ? 'green' : 'red'}
           hint="Ingresos menos egresos. Positivo = ganancia; negativo = pérdida en el período."
         />
+        {showUnpaid && (
+          <KpiCard
+            label="Por cobrar"
+            value={unpaid.total}
+            tone="amber"
+            hint="Total de los pedidos aún NO pagados dentro del rango de fechas. No entra en el balance (todavía no es dinero recibido)."
+          />
+        )}
       </div>
 
       {/* Detalle */}
@@ -779,6 +859,41 @@ function CashFlowTab({
           </div>
         </Card>
       </div>
+
+      {showUnpaid && (
+        <Card className="mt-4 p-4">
+          <h3 className="mb-3 flex items-center gap-2 font-semibold text-slate-900">
+            <span aria-hidden>⏳</span> Pedidos por cobrar
+          </h3>
+          {unpaid.rows.length === 0 ? (
+            <p className="text-sm text-slate-500">
+              No hay pedidos por cobrar en el período.
+            </p>
+          ) : (
+            <div className="space-y-1.5">
+              {unpaid.rows.map((r) => (
+                <div
+                  key={r.id}
+                  className="flex items-center justify-between gap-3 text-sm"
+                >
+                  <span className="min-w-0 truncate text-slate-700">
+                    {r.date.split('-').reverse().join('-')} · {r.name}
+                  </span>
+                  <span className="shrink-0 tabular-nums font-medium text-amber-700">
+                    {formatMoney(r.total)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="mt-4 flex justify-between border-t border-slate-100 pt-3 text-sm font-semibold">
+            <span>Total por cobrar</span>
+            <span className="tabular-nums text-amber-700">
+              {formatMoney(unpaid.total)}
+            </span>
+          </div>
+        </Card>
+      )}
     </div>
   )
 }
@@ -791,12 +906,13 @@ function KpiCard({
 }: {
   label: string
   value: number
-  tone: 'green' | 'red'
+  tone: 'green' | 'red' | 'amber'
   hint?: string
 }) {
   const tones = {
     green: 'border-emerald-100 bg-emerald-50 text-emerald-700',
     red: 'border-red-100 bg-red-50 text-red-700',
+    amber: 'border-amber-100 bg-amber-50 text-amber-700',
   }
   return (
     <div className={`rounded-2xl border p-4 ${tones[tone]}`}>
@@ -887,9 +1003,10 @@ function RepartidoresTab({
     const supplyQty = new Map<string, number>()
     for (const o of orders) {
       if (o.driverId !== driverId) continue
-      // La fecha del reporte es la de ENTREGA. Si el pedido no está entregado no
-      // tiene fecha de entrega: sólo se incluye cuando no hay filtro de fechas.
-      const date = o.delivered_at ? toLocalDateStr(o.delivered_at) : null
+      // Se filtra por la FECHA DE LA RUTA (igual que la "Carga de la ruta" y el
+      // módulo Entregas). Los pedidos fuera de ruta no tienen fecha de ruta, así
+      // que sólo entran cuando no hay filtro de fechas.
+      const date = o.routeDate ?? null
       if (fromDate || toDate) {
         if (!date) continue
         if (fromDate && date < fromDate) continue
@@ -1007,8 +1124,8 @@ function RepartidoresTab({
               setFromDate(f)
               setToDate(t)
             }}
-            label="Fecha de entrega"
-            hint="Se filtra por la fecha en que se marcó el pedido como entregado."
+            label="Fecha de la ruta"
+            hint="Se filtra por la fecha de la ruta en que se entregó el pedido (coincide con la Carga de la ruta y Entregas)."
           />
         </div>
       </Card>

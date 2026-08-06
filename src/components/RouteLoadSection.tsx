@@ -15,6 +15,7 @@ export function RouteLoadSection({
   onSaved,
   startEditing,
   canEdit,
+  addOnly = false,
 }: {
   route: RouteDetail
   supplies: Supply[]
@@ -23,6 +24,12 @@ export function RouteLoadSection({
   startEditing: boolean
   /** Si es false, sólo se muestra el resumen (sin registrar/editar). */
   canEdit: boolean
+  /**
+   * Si es true, el formulario SÓLO suma a la carga actual (no permite reducir
+   * ni sobrescribir). Se usa para el repartidor: puede agregar más carga, pero
+   * no modificar la existente.
+   */
+  addOnly?: boolean
 }) {
   const loadMap = useMemo(() => {
     const m = new Map<string, number>()
@@ -33,22 +40,30 @@ export function RouteLoadSection({
   const [editing, setEditing] = useState(startEditing && canEdit)
   const [draft, setDraft] = useState<Record<string, string>>({})
 
-  // Al entrar en modo edición, precargamos las cantidades actuales.
+  // Al entrar en modo edición precargamos: en "editar" (admin) las cantidades
+  // actuales; en "agregar" (repartidor) se parte de vacío (lo que se suma).
   useEffect(() => {
     if (!editing) return
     const d: Record<string, string> = {}
-    for (const s of supplies) d[s.id] = String(loadMap.get(s.id) ?? 0)
+    for (const s of supplies) {
+      d[s.id] = addOnly ? '' : String(loadMap.get(s.id) ?? 0)
+    }
     setDraft(d)
-  }, [editing, supplies, loadMap])
+  }, [editing, supplies, loadMap, addOnly])
 
   const saveMutation = useMutation({
     mutationFn: () =>
       saveRouteLoads(
         route.id,
-        supplies.map((s) => ({
-          supply_id: s.id,
-          quantity: Math.max(0, Math.trunc(Number(draft[s.id]) || 0)),
-        }))
+        supplies.map((s) => {
+          const entered = Math.max(0, Math.trunc(Number(draft[s.id]) || 0))
+          const current = loadMap.get(s.id) ?? 0
+          // "Agregar" suma a lo que ya había; "editar" fija el valor absoluto.
+          return {
+            supply_id: s.id,
+            quantity: addOnly ? current + entered : entered,
+          }
+        })
       ),
     onSuccess: () => {
       onSaved()
@@ -81,10 +96,13 @@ export function RouteLoadSection({
     return (
       <Card className="p-4">
         <h2 className="mb-1 flex items-center gap-2 font-semibold text-slate-900">
-          <span aria-hidden>🛒</span> Carga inicial de la ruta
+          <span aria-hidden>🛒</span>{' '}
+          {addOnly ? 'Agregar a la carga' : 'Carga inicial de la ruta'}
         </h2>
         <p className="mb-3 text-sm text-slate-500">
-          Indica cuántas unidades de cada insumo salieron en el camión.
+          {addOnly
+            ? 'Indica cuántas unidades ADICIONALES salieron en el camión. Se sumarán a la carga actual.'
+            : 'Indica cuántas unidades de cada insumo salieron en el camión.'}
         </p>
         {supplies.length === 0 ? (
           <EmptyState>
@@ -106,12 +124,18 @@ export function RouteLoadSection({
                 >
                   <span className="min-w-0 truncate text-sm text-slate-700">
                     {s.name}
+                    {addOnly && (
+                      <span className="ml-1 text-xs text-slate-400">
+                        (actual: {loadMap.get(s.id) ?? 0})
+                      </span>
+                    )}
                   </span>
                   <input
                     type="number"
                     min="0"
                     step="1"
-                    value={draft[s.id] ?? '0'}
+                    value={draft[s.id] ?? (addOnly ? '' : '0')}
+                    placeholder={addOnly ? '0' : undefined}
                     onChange={(e) =>
                       setDraft((d) => ({ ...d, [s.id]: e.target.value }))
                     }
@@ -131,7 +155,11 @@ export function RouteLoadSection({
                 </Button>
               )}
               <Button type="submit" disabled={saveMutation.isPending}>
-                {saveMutation.isPending ? 'Guardando…' : 'Guardar carga'}
+                {saveMutation.isPending
+                  ? 'Guardando…'
+                  : addOnly
+                    ? 'Agregar a la carga'
+                    : 'Guardar carga'}
               </Button>
             </div>
           </form>
@@ -149,7 +177,7 @@ export function RouteLoadSection({
         </span>
         {canEdit && (
           <Button variant="secondary" onClick={() => setEditing(true)}>
-            Editar carga
+            {addOnly ? 'Agregar carga' : 'Editar carga'}
           </Button>
         )}
       </div>

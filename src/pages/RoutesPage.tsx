@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
+  closeRoute,
   createRoute,
   deleteRoute,
   driverLabel,
@@ -84,6 +85,51 @@ export default function RoutesPage() {
       setRouteDriver(id, driverId),
     onSuccess: invalidate,
   })
+
+  // --- Cerrar ruta ---
+  // Pendientes = pedidos sin entregar + retiros sin recoger.
+  const pendingOf = (r: RouteSummary) =>
+    r.orderCount - r.deliveredCount + (r.pickupCount - r.pickupDoneCount)
+
+  const [closingRoute, setClosingRoute] = useState<RouteSummary | null>(null)
+  const [closeMode, setCloseMode] = useState<'ask' | 'create'>('ask')
+  const [closeForm, setCloseForm] = useState<RouteInput>(emptyForm())
+
+  // Cerrar y desasignar los pendientes (o sin pendientes).
+  const closeOnlyMutation = useMutation({
+    mutationFn: (routeId: string) => closeRoute(routeId, null),
+    onSuccess: () => {
+      invalidate()
+      setClosingRoute(null)
+    },
+  })
+
+  // Cerrar creando una nueva ruta y moviendo los pendientes a ella.
+  const closeWithNewMutation = useMutation({
+    mutationFn: async () => {
+      const newId = await createRoute(closeForm)
+      await closeRoute(closingRoute!.id, newId)
+    },
+    onSuccess: () => {
+      invalidate()
+      setClosingRoute(null)
+    },
+  })
+
+  function onCloseClick(r: RouteSummary) {
+    if (pendingOf(r) <= 0) {
+      if (confirm(`¿Cerrar la ruta “${r.name || 'sin nombre'}”?`))
+        closeOnlyMutation.mutate(r.id)
+      return
+    }
+    setCloseMode('ask')
+    setCloseForm({
+      ...emptyForm(),
+      name: r.name ? `Pendientes de ${r.name}` : '',
+      driver_id: r.driver_id,
+    })
+    setClosingRoute(r)
+  }
 
   function openNew() {
     setForm(emptyForm())
@@ -235,6 +281,15 @@ export default function RoutesPage() {
                         Abrir
                       </Button>
                     </Link>
+                    {canManage && !r.closed_at && (
+                      <Button
+                        variant="secondary"
+                        className="flex-1 sm:flex-none"
+                        onClick={() => onCloseClick(r)}
+                      >
+                        🔒 Cerrar ruta
+                      </Button>
+                    )}
                     {canManage && (
                       <Button
                         variant="danger"
@@ -350,6 +405,136 @@ export default function RoutesPage() {
           </div>
         </form>
       </Modal>
+
+      {/* --- Cerrar ruta (con pendientes) --- */}
+      <Modal
+        open={Boolean(closingRoute)}
+        onClose={() => setClosingRoute(null)}
+        title="Cerrar ruta"
+      >
+        {closingRoute &&
+          (closeMode === 'ask' ? (
+            <div className="space-y-4">
+              <p className="text-sm text-slate-600">
+                La ruta “{closingRoute.name || 'sin nombre'}” tiene{' '}
+                <span className="font-semibold">{pendingOf(closingRoute)}</span>{' '}
+                {pendingOf(closingRoute) === 1 ? 'pendiente' : 'pendientes'} sin
+                entregar (pedidos y/o retiros). ¿Qué deseas hacer con ellos?
+              </p>
+              <div className="space-y-2">
+                <Button
+                  className="w-full"
+                  onClick={() => setCloseMode('create')}
+                >
+                  Crear una nueva ruta con los pendientes
+                </Button>
+                <Button
+                  variant="secondary"
+                  className="w-full"
+                  disabled={closeOnlyMutation.isPending}
+                  onClick={() => closeOnlyMutation.mutate(closingRoute.id)}
+                >
+                  {closeOnlyMutation.isPending
+                    ? 'Cerrando…'
+                    : 'Sólo cerrar (dejar pendientes sin ruta)'}
+                </Button>
+                <Button
+                  variant="ghost"
+                  className="w-full"
+                  onClick={() => setClosingRoute(null)}
+                >
+                  Cancelar
+                </Button>
+              </div>
+              {closeOnlyMutation.isError && (
+                <p className="text-sm text-red-600">
+                  Error: {(closeOnlyMutation.error as Error).message}
+                </p>
+              )}
+            </div>
+          ) : (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                closeWithNewMutation.mutate()
+              }}
+              className="space-y-4"
+            >
+              <p className="text-sm text-slate-500">
+                Se creará esta ruta y se moverán a ella los{' '}
+                {pendingOf(closingRoute)} pendientes de “
+                {closingRoute.name || 'sin nombre'}”.
+              </p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <Label>Nombre</Label>
+                  <TextInput
+                    value={closeForm.name}
+                    onChange={(e) =>
+                      setCloseForm({ ...closeForm, name: e.target.value })
+                    }
+                    placeholder="Ruta de pendientes"
+                  />
+                </div>
+                <div>
+                  <Label>Fecha *</Label>
+                  <TextInput
+                    type="date"
+                    value={closeForm.route_date}
+                    onChange={(e) =>
+                      setCloseForm({ ...closeForm, route_date: e.target.value })
+                    }
+                    required
+                  />
+                </div>
+              </div>
+              <div>
+                <Label>Repartidor</Label>
+                <select
+                  value={closeForm.driver_id ?? ''}
+                  onChange={(e) =>
+                    setCloseForm({
+                      ...closeForm,
+                      driver_id: e.target.value || null,
+                    })
+                  }
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-sky-500"
+                >
+                  <option value="">Sin repartidor</option>
+                  {drivers?.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {driverLabel(d)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {closeWithNewMutation.isError && (
+                <p className="text-sm text-red-600">
+                  Error: {(closeWithNewMutation.error as Error).message}
+                </p>
+              )}
+              <div className="flex justify-end gap-2 pt-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => setCloseMode('ask')}
+                >
+                  Volver
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={
+                    !closeForm.route_date || closeWithNewMutation.isPending
+                  }
+                >
+                  {closeWithNewMutation.isPending
+                    ? 'Creando…'
+                    : 'Crear ruta y mover pendientes'}
+                </Button>
+              </div>
+            </form>
+          ))}
+      </Modal>
     </div>
   )
 }
@@ -370,7 +555,10 @@ function RouteStatusBadge({ route }: { route: RouteSummary }) {
     orderCount > 0 && paidCount === orderCount && pickupsDone
   let label: string
   let cls: string
-  if (stopCount === 0) {
+  if (route.closed_at) {
+    label = 'Cerrada'
+    cls = 'bg-slate-700 text-white'
+  } else if (stopCount === 0) {
     label = 'Sin pedidos'
     cls = 'bg-slate-100 text-slate-500'
   } else if (allPaid) {

@@ -1,6 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
-import { getDeliverySummary } from '../api/deliveries'
 import { driverLabel, listDrivers } from '../api/routes'
 import { listOrders } from '../api/orders'
 import { listCosts } from '../api/costs'
@@ -8,7 +7,7 @@ import { listProducts } from '../api/products'
 import { listSupplies } from '../api/supplies'
 import { useAuth } from '../lib/auth'
 import { paidWithMethod } from '../lib/order'
-import { formatMoney, toLocalDateStr } from '../lib/format'
+import { formatMoney } from '../lib/format'
 import { makeReportDoc, addReportTable, saveReport } from '../lib/reportPdf'
 import { DateRangeFilter } from '../components/DateRangeFilter'
 import {
@@ -38,22 +37,18 @@ export default function DeliveriesSummaryPage() {
     enabled: !isRepartidor,
   })
 
-  const { data, isLoading, isError, error } = useQuery({
-    queryKey: ['delivery-summary', effectiveDriverId, fromDate, toDate],
-    queryFn: () =>
-      getDeliverySummary({
-        driverId: effectiveDriverId,
-        from: fromDate || null,
-        to: toDate || null,
-      }),
-  })
-
-  // Datos extra para el resumen personal del repartidor (sólo se cargan si lo es).
-  const { data: myOrders } = useQuery({
+  // Se cuenta a partir de los pedidos entregados y sus ítems (igual que la
+  // "Carga de la ruta"), no de un resumen agregado, para que ambos coincidan.
+  const {
+    data: orders,
+    isLoading,
+    isError,
+    error,
+  } = useQuery({
     queryKey: ['orders'],
     queryFn: listOrders,
-    enabled: isRepartidor,
   })
+
   const { data: myCosts } = useQuery({
     queryKey: ['costs'],
     queryFn: listCosts,
@@ -75,19 +70,18 @@ export default function DeliveriesSummaryPage() {
   // Ventas en efectivo (pedidos pagados en efectivo dentro del rango).
   const ventasEfectivo = useMemo(() => {
     let sum = 0
-    for (const o of myOrders ?? []) {
+    for (const o of orders ?? []) {
       if (!o.paid) continue
-      // Se cuenta por FECHA DE ENTREGA. Si hay filtro y el pedido no tiene
-      // fecha de entrega (aún sin entregar), no entra en el rango.
+      // Se cuenta por la FECHA DE LA RUTA (igual que las tablas de abajo).
       if (fromDate || toDate) {
-        if (!o.delivered_at) continue
-        if (!inRange(toLocalDateStr(o.delivered_at))) continue
+        if (!o.routeDate) continue
+        if (!inRange(o.routeDate)) continue
       }
       sum += paidWithMethod(o, 'efectivo')
     }
     return sum
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [myOrders, fromDate, toDate])
+  }, [orders, fromDate, toDate])
 
   // Total de mis costos en el rango.
   const totalCostos = useMemo(() => {
@@ -100,8 +94,41 @@ export default function DeliveriesSummaryPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myCosts, fromDate, toDate])
 
-  // Insumos entregados: se derivan de los productos entregados (según el resumen)
-  // multiplicando por los insumos que compone cada producto.
+  // Pedidos ENTREGADOS según el filtro actual (repartidor + fecha de entrega).
+  const deliveredOrders = useMemo(() => {
+    return (orders ?? []).filter((o) => {
+      if (o.status !== 'delivered') return false
+      if (effectiveDriverId && o.driverId !== effectiveDriverId) return false
+      // Se filtra por la FECHA DE LA RUTA, igual que la "Carga de la ruta"
+      // (así ambos cuadran aunque un pedido se haya marcado entregado otro día).
+      if (fromDate || toDate) {
+        if (!o.routeDate) return false
+        if (!inRange(o.routeDate)) return false
+      }
+      return true
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orders, effectiveDriverId, fromDate, toDate])
+
+  // Productos entregados: se suman las cantidades de los ítems de cada pedido.
+  const productsSummary = useMemo(() => {
+    const totals = new Map<string, { name: string; qty: number }>()
+    for (const o of deliveredOrders) {
+      for (const it of o.items) {
+        const cur = totals.get(it.product_id)
+        if (cur) cur.qty += it.quantity
+        else
+          totals.set(it.product_id, {
+            name: it.product?.name ?? 'Producto',
+            qty: it.quantity,
+          })
+      }
+    }
+    return Array.from(totals.values()).sort((a, b) => b.qty - a.qty)
+  }, [deliveredOrders])
+
+  // Insumos entregados: cada ítem entregado descuenta cantidad × insumos que
+  // componen el producto (misma lógica que la "Carga de la ruta").
   const suppliesSummary = useMemo(() => {
     const productSupply = new Map<string, { supply_id: string; quantity: number }[]>()
     products?.forEach((p) => {
@@ -111,38 +138,23 @@ export default function DeliveriesSummaryPage() {
     supplies?.forEach((s) => supplyName.set(s.id, s.name))
 
     const totals = new Map<string, number>()
-    for (const r of data ?? []) {
-      const links = productSupply.get(r.product_id)
-      if (!links) continue
-      for (const link of links) {
-        totals.set(
-          link.supply_id,
-          (totals.get(link.supply_id) ?? 0) +
-            Number(r.total_quantity) * link.quantity
-        )
+    for (const o of deliveredOrders) {
+      for (const it of o.items) {
+        const links = productSupply.get(it.product_id)
+        if (!links) continue
+        for (const link of links) {
+          totals.set(
+            link.supply_id,
+            (totals.get(link.supply_id) ?? 0) + it.quantity * link.quantity
+          )
+        }
       }
     }
     return Array.from(totals, ([id, qty]) => ({
       name: supplyName.get(id) ?? 'Insumo',
       qty,
     })).sort((a, b) => b.qty - a.qty)
-  }, [data, products, supplies])
-
-  // Productos entregados agregados según el filtro (un solo repartidor o todos),
-  // sin separar por persona: se suma la misma referencia entre repartidores.
-  const productsSummary = useMemo(() => {
-    const totals = new Map<string, { name: string; qty: number }>()
-    for (const r of data ?? []) {
-      const cur = totals.get(r.product_id)
-      if (cur) cur.qty += Number(r.total_quantity)
-      else
-        totals.set(r.product_id, {
-          name: r.product_name,
-          qty: Number(r.total_quantity),
-        })
-    }
-    return Array.from(totals.values()).sort((a, b) => b.qty - a.qty)
-  }, [data])
+  }, [deliveredOrders, products, supplies])
 
   const totalUnits = useMemo(
     () => productsSummary.reduce((s, p) => s + p.qty, 0),
@@ -166,8 +178,10 @@ export default function DeliveriesSummaryPage() {
     setToDate('')
   }
 
+  const hasData = productsSummary.length > 0 || suppliesSummary.length > 0
+
   function exportPdf() {
-    if (!data || data.length === 0) return
+    if (!hasData) return
     const parts: string[] = [filterLabel]
     if (fromDate || toDate) {
       parts.push(`Rango ${fromDate || '…'} a ${toDate || '…'}`)
@@ -209,7 +223,7 @@ export default function DeliveriesSummaryPage() {
             : 'Cantidad entregada de cada producto por repartidor, por rango de fechas.'
         }
         action={
-          data && data.length > 0 ? (
+          hasData ? (
             <Button variant="secondary" onClick={exportPdf}>
               ⬇ Descargar PDF
             </Button>
@@ -237,16 +251,18 @@ export default function DeliveriesSummaryPage() {
               </select>
             </div>
           )}
-          <DateRangeFilter
-            from={fromDate}
-            to={toDate}
-            onChange={(f, t) => {
-              setFromDate(f)
-              setToDate(t)
-            }}
-            label="Fecha de entrega del pedido"
-            hint="Se filtra por la fecha en que se marcó el pedido como entregado."
-          />
+          <div className={isRepartidor ? 'sm:col-span-2' : undefined}>
+            <DateRangeFilter
+              from={fromDate}
+              to={toDate}
+              onChange={(f, t) => {
+                setFromDate(f)
+                setToDate(t)
+              }}
+              label="Fecha de la ruta"
+              hint="Se filtra por la fecha de la ruta en que se entregó el pedido (coincide con la Carga de la ruta)."
+            />
+          </div>
         </div>
 
         {hasFilters && (
@@ -305,7 +321,7 @@ export default function DeliveriesSummaryPage() {
         <Card className="border-red-200 bg-red-50 p-4 text-sm text-red-700">
           No se pudo cargar el resumen: {(error as Error).message}
         </Card>
-      ) : !data || data.length === 0 ? (
+      ) : !hasData ? (
         <EmptyState>No hay entregas con esos filtros.</EmptyState>
       ) : (
         <div>

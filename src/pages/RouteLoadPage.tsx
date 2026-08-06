@@ -106,7 +106,8 @@ export default function RouteLoadPage() {
         soldBySupply={soldBySupply}
         onSaved={onSaved}
         startEditing={!route.load_confirmed}
-        canEdit={!route.load_confirmed || !isRepartidor}
+        canEdit
+        addOnly={isRepartidor}
       />
     </div>
   )
