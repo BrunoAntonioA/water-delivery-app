@@ -271,34 +271,36 @@ export default function AbastecimientoPage() {
 
       {/* --- Filtros --- */}
       <Card className="mb-4 p-4">
-        <DateRangeFilter
-          from={fromDate}
-          to={toDate}
-          onChange={(f, t) => {
-            setFromDate(f)
-            setToDate(t)
-            setPage(1)
-          }}
-          label="Fecha"
-        />
-        <div className="mt-4">
-          <Label>Proveedor</Label>
-          <select
-            value={providerFilter}
-            onChange={(e) => {
-              setProviderFilter(e.target.value)
+        <div className="grid gap-4 sm:grid-cols-2 sm:items-start">
+          <DateRangeFilter
+            from={fromDate}
+            to={toDate}
+            onChange={(f, t) => {
+              setFromDate(f)
+              setToDate(t)
               setPage(1)
             }}
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-sky-500 sm:max-w-xs"
-          >
-            <option value="">Todos</option>
-            <option value="__none__">Sin proveedor</option>
-            {providers?.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
+            label="Fecha"
+          />
+          <div>
+            <Label>Proveedor</Label>
+            <select
+              value={providerFilter}
+              onChange={(e) => {
+                setProviderFilter(e.target.value)
+                setPage(1)
+              }}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-sky-500"
+            >
+              <option value="">Todos</option>
+              <option value="__none__">Sin proveedor</option>
+              {providers?.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
         {hasFilters && (
           <div className="mt-3">
