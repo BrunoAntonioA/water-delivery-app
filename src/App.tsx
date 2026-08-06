@@ -18,6 +18,7 @@ import RoutesPage from './pages/RoutesPage'
 import RouteDetailPage from './pages/RouteDetailPage'
 import RouteLoadPage from './pages/RouteLoadPage'
 import CostsPage from './pages/CostsPage'
+import AbastecimientoPage from './pages/AbastecimientoPage'
 import CompanyDetailPage from './pages/CompanyDetailPage'
 import TemplatesPage from './pages/TemplatesPage'
 import UsersPage from './pages/UsersPage'
@@ -35,6 +36,7 @@ const NAV: { module: ModuleKey; to: string; label: string; icon: string }[] = [
   { module: 'clientes', to: '/clientes', label: 'Clientes', icon: '👥' },
   { module: 'productos', to: '/productos', label: 'Productos', icon: '💧' },
   { module: 'costos', to: '/costos', label: 'Costos', icon: '💸' },
+  { module: 'abastecimiento', to: '/abastecimiento', label: 'Abastecimiento', icon: '🛒' },
   { module: 'reportes', to: '/reportes', label: 'Reportes', icon: '📊' },
   { module: 'plantillas', to: '/plantillas', label: 'Plantillas', icon: '💬' },
   { module: 'usuarios', to: '/usuarios', label: 'Usuarios', icon: '🔑' },
@@ -336,6 +338,14 @@ export default function App() {
             element={
               <Protected module="costos" home={home}>
                 <CostsPage />
+              </Protected>
+            }
+          />
+          <Route
+            path="/abastecimiento"
+            element={
+              <Protected module="abastecimiento" home={home}>
+                <AbastecimientoPage />
               </Protected>
             }
           />

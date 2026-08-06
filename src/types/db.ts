@@ -79,6 +79,42 @@ export interface CostWithCategory extends Cost {
   creatorName: string | null
 }
 
+// --- Abastecimiento (proveedores y compras de insumos) ---
+
+export interface Provider {
+  id: string
+  name: string
+  phone: string | null
+  created_at: string
+}
+
+export interface SupplyPurchaseItem {
+  id: string
+  purchase_id: string
+  supply_id: string | null
+  quantity: number
+  unit_price: number
+}
+
+export interface SupplyPurchase {
+  id: string
+  provider_id: string | null
+  purchase_date: string
+  notes: string | null
+  total: number
+  created_at: string
+}
+
+export interface SupplyPurchaseItemWithSupply extends SupplyPurchaseItem {
+  supply: Supply | null
+}
+
+/** Abastecimiento con su proveedor y sus líneas (insumo + cantidad + precio). */
+export interface SupplyPurchaseDetail extends SupplyPurchase {
+  provider: Provider | null
+  items: SupplyPurchaseItemWithSupply[]
+}
+
 export interface Order {
   id: string
   client_id: string | null

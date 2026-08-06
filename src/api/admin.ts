@@ -103,7 +103,19 @@ export interface NewUserInput {
  * desactivado de la empresa, lo REACTIVA en vez de crear otra cuenta (evita el
  * error de "rate limit" al reusar un correo).
  */
-export async function createUser(input: NewUserInput): Promise<void> {
+export interface CreateUserResult {
+  status: 'created' | 'reactivated'
+  /** true sólo si se envió realmente el correo de verificación. */
+  emailSent: boolean
+}
+
+/**
+ * Crea (o reactiva) un usuario. Devuelve qué ocurrió y si se envió el correo de
+ * verificación, para que la UI muestre el mensaje adecuado.
+ */
+export async function createUser(
+  input: NewUserInput
+): Promise<CreateUserResult> {
   const email = input.email.trim().toLowerCase()
 
   // ¿Existe ya un perfil (posiblemente desactivado) con este correo? Si está
@@ -129,7 +141,7 @@ export async function createUser(input: NewUserInput): Promise<void> {
       })
       .eq('id', existing.id)
     if (error) throw error
-    return
+    return { status: 'reactivated', emailSent: false }
   }
 
   // Alta nueva: la realiza la Edge Function "admin-create-user" con el service
@@ -159,19 +171,25 @@ export async function createUser(input: NewUserInput): Promise<void> {
     throw new Error(message)
   }
 
-  // La cuenta se creó sin confirmar: se le envía el correo de verificación.
-  // Si el envío falla (p. ej. límite de correos), no se revierte la creación;
-  // el usuario puede pedir el enlace luego. El correo confirma y, al abrirlo,
-  // inicia sesión; la contraseña asignada sirve para los ingresos siguientes.
+  // La cuenta se creó sin confirmar: se le intenta enviar el correo de
+  // verificación. Si el envío falla (p. ej. la cuenta ya estaba confirmada, o
+  // no hay SMTP/límite de correos), no se revierte la creación: sólo se informa
+  // que no se envió el correo.
+  let emailSent = false
   try {
-    await supabase.auth.resend({
+    const { error: resendErr } = await supabase.auth.resend({
       type: 'signup',
       email,
       options: { emailRedirectTo: window.location.origin },
     })
+    emailSent = !resendErr
+    if (resendErr) {
+      console.warn('No se pudo enviar el correo de verificación:', resendErr)
+    }
   } catch (e) {
     console.warn('No se pudo enviar el correo de verificación:', e)
   }
+  return { status: 'created', emailSent }
 }
 
 /**

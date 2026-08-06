@@ -175,5 +175,5 @@ Deno.serve(async (req) => {
     return json({ error: profileErr.message }, 400)
   }
 
-  return json({ id: created.user.id }, 200)
+  return json({ id: userId }, 200)
 })

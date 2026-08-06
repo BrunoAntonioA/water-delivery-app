@@ -25,6 +25,7 @@ export type ModuleKey =
   | 'clientes'
   | 'productos'
   | 'costos'
+  | 'abastecimiento'
   | 'plantillas'
   | 'usuarios'
   | 'suscripcion'
@@ -45,11 +46,19 @@ export const ROLE_MODULES: Record<Role, ModuleKey[]> = {
     'clientes',
     'productos',
     'costos',
+    'abastecimiento',
     'plantillas',
     'usuarios',
     'suscripcion',
   ],
-  operador: ['pedidos', 'reportes', 'clientes', 'productos', 'costos'],
+  operador: [
+    'pedidos',
+    'reportes',
+    'clientes',
+    'productos',
+    'costos',
+    'abastecimiento',
+  ],
   repartidor: ['rutas', 'entregas', 'costos'],
 }
 
@@ -72,6 +81,7 @@ export const COMPANY_MODULES: ModuleKey[] = [
   'clientes',
   'productos',
   'costos',
+  'abastecimiento',
   'reportes',
   'plantillas',
   'usuarios',
@@ -85,6 +95,7 @@ export const MODULE_LABELS: Record<ModuleKey, string> = {
   clientes: 'Clientes',
   productos: 'Productos',
   costos: 'Costos',
+  abastecimiento: 'Abastecimiento',
   plantillas: 'Plantillas',
   usuarios: 'Usuarios',
   suscripcion: 'Suscripción',

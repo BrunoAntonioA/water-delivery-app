@@ -50,6 +50,8 @@ export function CompanyUsers({ companyId }: { companyId: string }) {
 
   const [modalOpen, setModalOpen] = useState(false)
   const [form, setForm] = useState<FormState>(emptyForm)
+  // Aviso tras crear un usuario (p. ej. "se envió un correo de confirmación").
+  const [notice, setNotice] = useState<string | null>(null)
 
   // Edición (contraseña / nombre) de un usuario existente.
   const [editUser, setEditUser] = useState<Profile | null>(null)
@@ -66,7 +68,18 @@ export function CompanyUsers({ companyId }: { companyId: string }) {
         role: form.role,
         company_id: companyId,
       }),
-    onSuccess: () => {
+    onSuccess: (result) => {
+      const email = form.email.trim()
+      // El mensaje del correo SÓLO cuando realmente se envió la verificación.
+      if (result.emailSent) {
+        setNotice(
+          `Usuario creado. Se envió un correo de confirmación a ${email}; debe abrir el enlace para activar su cuenta.`
+        )
+      } else if (result.status === 'reactivated') {
+        setNotice(`Usuario reactivado (${email}).`)
+      } else {
+        setNotice(`Usuario creado (${email}).`)
+      }
       invalidate()
       setModalOpen(false)
     },
@@ -125,6 +138,19 @@ export function CompanyUsers({ companyId }: { companyId: string }) {
 
   return (
     <div>
+      {notice && (
+        <div className="mb-3 flex items-start justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-800">
+          <span>📧 {notice}</span>
+          <button
+            type="button"
+            onClick={() => setNotice(null)}
+            aria-label="Cerrar aviso"
+            className="shrink-0 text-emerald-600 hover:text-emerald-800"
+          >
+            ✕
+          </button>
+        </div>
+      )}
       <div className="mb-3 flex items-center justify-between">
         <span className="text-sm text-slate-500">
           {users?.length ?? 0} {(users?.length ?? 0) === 1 ? 'usuario' : 'usuarios'}

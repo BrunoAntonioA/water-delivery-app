@@ -27,3 +27,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Supabase CLI (generado localmente por `supabase link`/serve — no commitear)
+supabase/.temp
+supabase/.branches
+supabase/.env

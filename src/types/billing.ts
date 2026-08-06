@@ -9,6 +9,7 @@ export const TRIAL_MODULES: ModuleKey[] = [
   'clientes',
   'productos',
   'costos',
+  'abastecimiento',
   'entregas',
   'reportes',
   'plantillas',

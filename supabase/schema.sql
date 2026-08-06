@@ -133,6 +133,40 @@ create index if not exists costs_category_id_idx on costs (category_id);
 create index if not exists costs_issue_date_idx on costs (issue_date);
 
 -- ----------------------------------------------------------------------------
+--  Abastecimiento: registro de cada compra/reposición de insumos. Cada
+--  abastecimiento tiene un PROVEEDOR y varias líneas (insumo, cantidad y precio
+--  unitario). El total del abastecimiento es la suma de cantidad × precio
+--  unitario de todas sus líneas. Sólo lo usan admin/operador (no repartidor).
+-- ----------------------------------------------------------------------------
+create table if not exists providers (
+  id         uuid primary key default gen_random_uuid(),
+  name       text not null,
+  phone      text,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists supply_purchases (
+  id            uuid primary key default gen_random_uuid(),
+  provider_id   uuid references providers (id) on delete set null,
+  purchase_date date not null default current_date,
+  notes         text,
+  total         numeric(12, 2) not null default 0 check (total >= 0),
+  created_at    timestamptz not null default now()
+);
+create index if not exists supply_purchases_provider_id_idx on supply_purchases (provider_id);
+create index if not exists supply_purchases_date_idx on supply_purchases (purchase_date);
+
+create table if not exists supply_purchase_items (
+  id          uuid primary key default gen_random_uuid(),
+  purchase_id uuid not null references supply_purchases (id) on delete cascade,
+  supply_id   uuid references supplies (id) on delete set null,
+  quantity    integer not null default 1 check (quantity > 0),
+  unit_price  numeric(12, 2) not null default 0 check (unit_price >= 0),
+  created_at  timestamptz not null default now()
+);
+create index if not exists supply_purchase_items_purchase_id_idx on supply_purchase_items (purchase_id);
+
+-- ----------------------------------------------------------------------------
 --  Pedidos
 -- ----------------------------------------------------------------------------
 create table if not exists orders (
@@ -325,8 +359,16 @@ create table if not exists companies (
 -- defecto, todos. 'empresas' no se incluye (es exclusivo del superadmin).
 alter table companies add column if not exists modules text[] not null default array[
   'pedidos', 'reportes', 'entregas', 'rutas', 'clientes',
-  'productos', 'costos', 'plantillas', 'usuarios'
+  'productos', 'costos', 'plantillas', 'usuarios', 'abastecimiento'
 ];
+-- Habilita "abastecimiento" en las empresas que ya existían (idempotente). Se
+-- desactiva antes el trigger guard_company_modules (si ya existe de una corrida
+-- previa) porque en el SQL Editor no hay auth.uid() y el guard lo bloquearía; el
+-- trigger se vuelve a crear más abajo.
+drop trigger if exists companies_guard_modules on companies;
+update companies
+set modules = array_append(modules, 'abastecimiento')
+where not ('abastecimiento' = any(modules));
 -- Datos comerciales de la empresa (se capturan en el registro público).
 alter table companies add column if not exists rut text;
 alter table companies add column if not exists razon_social text;
@@ -363,11 +405,11 @@ values
    25000, array['rutas','pedidos','clientes','productos'], 3, 500, 10, 1),
   ('pro', 'Pro',
    'La opción completa para distribuidoras que están creciendo.',
-   40000, array['rutas','pedidos','clientes','productos','costos','entregas','reportes','plantillas'],
+   40000, array['rutas','pedidos','clientes','productos','costos','entregas','reportes','plantillas','abastecimiento'],
    8, 5000, 10, 2),
   ('full', 'Full',
    'Sin límites, para operaciones grandes con varios camiones.',
-   50000, array['rutas','pedidos','clientes','productos','costos','entregas','reportes','plantillas','usuarios'],
+   50000, array['rutas','pedidos','clientes','productos','costos','entregas','reportes','plantillas','usuarios','abastecimiento'],
    null, null, 10, 3)
 on conflict (key) do update set
   name        = excluded.name,
@@ -767,6 +809,9 @@ alter table cost_categories add column if not exists company_id uuid references 
 alter table costs add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
 -- Quién registró el costo (para atribuirlo y filtrarlo por usuario).
 alter table costs add column if not exists created_by uuid references profiles (id) on delete set null default auth.uid();
+alter table providers add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
+alter table supply_purchases add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
+alter table supply_purchase_items add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
 
 -- ----------------------------------------------------------------------------
 --  Auditoría: quién creó/modificó y cuándo (orders, costs, profiles). Lo llena
@@ -825,6 +870,9 @@ begin
   update route_stops set company_id = cid where company_id is null;
   update route_loads set company_id = cid where company_id is null;
   update route_pickups set company_id = cid where company_id is null;
+  update providers set company_id = cid where company_id is null;
+  update supply_purchases set company_id = cid where company_id is null;
+  update supply_purchase_items set company_id = cid where company_id is null;
 end$$;
 
 -- Migración: si products tenía un único insumo (products.supply_id, versión
@@ -919,6 +967,9 @@ alter table route_pickups enable row level security;
 alter table whatsapp_templates enable row level security;
 alter table cost_categories enable row level security;
 alter table costs       enable row level security;
+alter table providers   enable row level security;
+alter table supply_purchases enable row level security;
+alter table supply_purchase_items enable row level security;
 alter table companies   enable row level security;
 alter table profiles    enable row level security;
 
@@ -927,7 +978,7 @@ do $$
 declare
   t text;
 begin
-  foreach t in array array['clients', 'addresses', 'products', 'supplies', 'product_supplies', 'whatsapp_templates', 'cost_categories', 'costs', 'orders', 'order_items', 'routes', 'route_stops', 'route_loads', 'route_pickups']
+  foreach t in array array['clients', 'addresses', 'products', 'supplies', 'product_supplies', 'whatsapp_templates', 'cost_categories', 'costs', 'providers', 'supply_purchases', 'supply_purchase_items', 'orders', 'order_items', 'routes', 'route_stops', 'route_loads', 'route_pickups']
   loop
     execute format('drop policy if exists "allow_all_%1$s" on %1$s;', t);       -- limpia política antigua
     execute format('drop policy if exists "tenant_%1$s" on %1$s;', t);
@@ -966,6 +1017,18 @@ create policy "tenant_costs" on costs for all
     company_id = current_company_id()
     and (current_user_role() <> 'repartidor' or created_by = auth.uid())
   );
+
+-- Abastecimiento (proveedores y compras de insumos): sólo admin/operador de la
+-- empresa; el repartidor no tiene acceso.
+create policy "tenant_providers" on providers for all
+  using (company_id = current_company_id() and current_user_role() <> 'repartidor')
+  with check (company_id = current_company_id() and current_user_role() <> 'repartidor');
+create policy "tenant_supply_purchases" on supply_purchases for all
+  using (company_id = current_company_id() and current_user_role() <> 'repartidor')
+  with check (company_id = current_company_id() and current_user_role() <> 'repartidor');
+create policy "tenant_supply_purchase_items" on supply_purchase_items for all
+  using (company_id = current_company_id() and current_user_role() <> 'repartidor')
+  with check (company_id = current_company_id() and current_user_role() <> 'repartidor');
 
 -- Rutas: admin/operador ven todas las de la empresa; el repartidor sólo las suyas.
 create policy "tenant_routes" on routes for all
