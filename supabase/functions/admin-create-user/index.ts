@@ -24,6 +24,26 @@ const json = (body: unknown, status = 200) =>
 
 const ALLOWED_ROLES = ['admin', 'operador', 'repartidor']
 
+// deno-lint-ignore no-explicit-any
+type Admin = any
+
+/** Busca una cuenta de Auth por correo (paginando la lista de usuarios). */
+async function findAuthUserByEmail(admin: Admin, email: string) {
+  for (let page = 1; page <= 20; page++) {
+    const { data, error } = await admin.auth.admin.listUsers({
+      page,
+      perPage: 200,
+    })
+    if (error || !data) break
+    const found = data.users.find(
+      (u: { email?: string }) => (u.email ?? '').toLowerCase() === email
+    )
+    if (found) return found
+    if (data.users.length < 200) break
+  }
+  return null
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'Método no permitido' }, 405)
@@ -101,23 +121,47 @@ Deno.serve(async (req) => {
   // 5) Crear la cuenta de Auth SIN confirmar: el usuario recibe un correo de
   //    verificación (lo dispara el frontend con auth.resend) y debe confirmarlo
   //    antes de poder iniciar sesión.
+  let userId: string
+  let createdNew = false
   const { data: created, error: createErr } = await admin.auth.admin.createUser({
     email,
     password,
     email_confirm: false,
   })
-  if (createErr || !created.user) {
+  if (created?.user) {
+    userId = created.user.id
+    createdNew = true
+  } else {
     const msg = createErr?.message ?? 'No se pudo crear la cuenta'
-    const already = /already|registered|exists/i.test(msg)
-    return json(
-      { error: already ? 'Ese correo ya tiene una cuenta.' : msg },
-      already ? 409 : 400
-    )
+    if (!/already|registered|exists/i.test(msg)) {
+      return json({ error: msg }, 400)
+    }
+    // El correo ya existe en Auth. Como el cliente ya verificó que no hay perfil
+    // en esta empresa, se trata de una cuenta HUÉRFANA (p. ej. un usuario que se
+    // eliminó y dejó la cuenta de acceso). La reutilizamos en vez de fallar.
+    const existing = await findAuthUserByEmail(admin, email)
+    if (!existing) {
+      return json({ error: 'Ese correo ya tiene una cuenta.' }, 409)
+    }
+    // Si esa cuenta AÚN tiene perfil (activo en otra empresa), no se reutiliza.
+    const { data: existingProfile } = await admin
+      .from('profiles')
+      .select('id')
+      .eq('id', existing.id)
+      .maybeSingle()
+    if (existingProfile) {
+      return json({ error: 'Ese correo ya tiene una cuenta.' }, 409)
+    }
+    const { error: updErr } = await admin.auth.admin.updateUserById(existing.id, {
+      password,
+    })
+    if (updErr) return json({ error: updErr.message }, 400)
+    userId = existing.id
   }
 
   // 6) Crear el perfil.
   const { error: profileErr } = await admin.from('profiles').insert({
-    id: created.user.id,
+    id: userId,
     company_id: companyId,
     role,
     full_name: fullName || null,
@@ -125,8 +169,9 @@ Deno.serve(async (req) => {
     created_by: caller.id,
   })
   if (profileErr) {
-    // Revertir la cuenta de Auth para no dejar usuarios huérfanos.
-    await admin.auth.admin.deleteUser(created.user.id)
+    // Sólo revertimos la cuenta de Auth si la acabamos de crear (no si era una
+    // cuenta reutilizada preexistente).
+    if (createdNew) await admin.auth.admin.deleteUser(userId)
     return json({ error: profileErr.message }, 400)
   }
 
