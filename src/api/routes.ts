@@ -58,6 +58,7 @@ export interface RouteSummary extends Route {
   paidCount: number // pedidos pagados
   pickupCount: number // paradas que son retiros
   pickupDoneCount: number // retiros recogidos
+  notesCount: number // pedidos con nota u observación de entrega
   driverName: string | null
 }
 
@@ -71,7 +72,7 @@ export async function listRoutes(): Promise<RouteSummary[]> {
   const { data, error } = await supabase
     .from('routes')
     .select(
-      '*, stops:route_stops(id, order:orders(status, paid), pickup:route_pickups(done)), driver_profile:profiles!driver_id(full_name, email)'
+      '*, stops:route_stops(id, order:orders(status, paid, notes, address:addresses(observation)), pickup:route_pickups(done)), driver_profile:profiles!driver_id(full_name, email)'
     )
     .order('route_date', { ascending: false })
   if (error) throw error
@@ -79,7 +80,12 @@ export async function listRoutes(): Promise<RouteSummary[]> {
     const { stops, driver_profile, ...route } = r as Route & {
       stops: {
         id: string
-        order: { status: OrderStatus; paid: boolean } | null
+        order: {
+          status: OrderStatus
+          paid: boolean
+          notes: string | null
+          address: { observation: string | null } | null
+        } | null
         pickup: { done: boolean } | null
       }[]
       driver_profile: DriverProfile
@@ -90,6 +96,12 @@ export async function listRoutes(): Promise<RouteSummary[]> {
       (s) => s.order && s.order.status !== 'ordered'
     ).length
     const paidCount = list.filter((s) => s.order?.paid).length
+    // Pedidos con nota u observación de entrega (para avisar en la lista).
+    const notesCount = list.filter(
+      (s) =>
+        (s.order?.notes && s.order.notes.trim()) ||
+        (s.order?.address?.observation && s.order.address.observation.trim())
+    ).length
     return {
       ...route,
       stopCount: list.length,
@@ -98,6 +110,7 @@ export async function listRoutes(): Promise<RouteSummary[]> {
       paidCount,
       pickupCount: list.filter((s) => s.pickup).length,
       pickupDoneCount: list.filter((s) => s.pickup?.done).length,
+      notesCount,
       driverName: driverNameOf(driver_profile, route.driver),
     }
   })

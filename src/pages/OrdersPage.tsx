@@ -38,6 +38,7 @@ import {
   EmptyState,
   Label,
   MapButton,
+  NumberInput,
   Pagination,
   PageHeader,
   Spinner,
@@ -827,18 +828,11 @@ export default function OrdersPage() {
                           Cantidad
                         </span>
                         <div className="w-20 shrink-0">
-                          <TextInput
-                            type="number"
-                            min="1"
-                            inputMode="numeric"
+                          <NumberInput
+                            min={1}
                             value={it.quantity}
-                            onChange={(e) =>
-                              updateItem(i, {
-                                quantity: Math.max(
-                                  1,
-                                  Number(e.target.value) || 1
-                                ),
-                              })
+                            onValueChange={(n) =>
+                              updateItem(i, { quantity: n })
                             }
                             className="bg-white text-center"
                           />

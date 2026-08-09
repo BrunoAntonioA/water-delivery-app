@@ -19,3 +19,23 @@ body {
   background-color: #f8fafc;
   color: #0f172a;
 }
+
+/* --- Formularios en móvil --------------------------------------------------
+ * En iOS/Safari los <input type="date"> se ven diminutos (altura mínima según
+ * su contenido) y, con tipografía < 16px, el navegador hace zoom automático al
+ * enfocar cualquier campo. Se normaliza la altura y el tamaño de letra. */
+input[type='date'],
+input[type='datetime-local'],
+input[type='time'] {
+  min-height: 2.625rem; /* ~42px: misma altura que el resto de los campos */
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+@media (max-width: 640px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px; /* evita el zoom automático de iOS al enfocar */
+  }
+}

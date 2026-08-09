@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type {
   ButtonHTMLAttributes,
   InputHTMLAttributes,
@@ -74,6 +74,65 @@ export function TextInput(props: InputHTMLAttributes<HTMLInputElement>) {
     <input
       {...props}
       className={`w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100 ${props.className ?? ''}`}
+    />
+  )
+}
+
+/**
+ * Campo numérico que se puede EDITAR con normalidad: permite borrar todo el
+ * texto y escribir dígito a dígito, sin que se "reponga" solo mientras escribes.
+ * Mantiene un borrador de texto interno y sólo normaliza (recorta a entero y
+ * aplica el mínimo) al salir del campo. Hacia afuera expone un número.
+ */
+export function NumberInput({
+  value,
+  onValueChange,
+  min = 1,
+  className = '',
+  ...props
+}: Omit<
+  InputHTMLAttributes<HTMLInputElement>,
+  'value' | 'onChange' | 'type'
+> & {
+  value: number
+  onValueChange: (n: number) => void
+  min?: number
+}) {
+  const [draft, setDraft] = useState(String(value))
+  const [focused, setFocused] = useState(false)
+
+  // Mientras NO está enfocado, el borrador refleja el valor externo (reseteos,
+  // edición de un registro existente, etc.). Enfocado no se toca: manda lo que
+  // el usuario escribe (así puede dejarlo vacío para reemplazarlo).
+  useEffect(() => {
+    if (!focused) setDraft(String(value))
+  }, [value, focused])
+
+  function commit(raw: string) {
+    let n = Math.trunc(Number(raw))
+    if (raw.trim() === '' || Number.isNaN(n) || n < min) n = min
+    setDraft(String(n))
+    onValueChange(n)
+  }
+
+  return (
+    <input
+      {...props}
+      type="number"
+      inputMode="numeric"
+      value={draft}
+      onFocus={() => setFocused(true)}
+      onChange={(e) => {
+        const raw = e.target.value
+        setDraft(raw) // permite borrar/escribir libremente
+        const n = Math.trunc(Number(raw))
+        if (raw.trim() !== '' && !Number.isNaN(n) && n >= min) onValueChange(n)
+      }}
+      onBlur={(e) => {
+        setFocused(false)
+        commit(e.target.value)
+      }}
+      className={`w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100 ${className}`}
     />
   )
 }

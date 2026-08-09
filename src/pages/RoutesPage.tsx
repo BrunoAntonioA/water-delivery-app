@@ -245,6 +245,14 @@ export default function RoutesPage() {
                           total={r.pickupCount}
                         />
                       )}
+                      {r.notesCount > 0 && (
+                        <span
+                          className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800"
+                          title="Pedidos con nota u observación de entrega"
+                        >
+                          📝 {r.notesCount} con notas
+                        </span>
+                      )}
                     </div>
                   </Link>
                   <div className="flex flex-wrap items-center gap-2 sm:shrink-0 sm:justify-end">

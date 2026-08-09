@@ -62,6 +62,7 @@ import {
   EmptyState,
   Label,
   MapButton,
+  NumberInput,
   Spinner,
   TextInput,
 } from '../components/ui'
@@ -84,6 +85,43 @@ function pickupItemsText(
   return pickup.items
     .map((it) => `${it.quantity}× ${supplyName.get(it.supply_id) ?? 'Insumo'}`)
     .join(', ')
+}
+
+/**
+ * Instrucciones de entrega de un pedido: la NOTA del pedido (order.notes) y la
+ * OBSERVACIÓN de la dirección (address.observation). Se muestran juntas en la
+ * ruta para que el repartidor las lea sin abrir el pedido.
+ */
+function orderNoteParts(order: OrderDetail | null): { note: string; obs: string } {
+  return {
+    note: order?.notes?.trim() || '',
+    obs: order?.address?.observation?.trim() || '',
+  }
+}
+
+function NoteLines({ note, obs }: { note: string; obs: string }) {
+  return (
+    <div className="space-y-0.5 text-xs leading-snug">
+      {obs && (
+        <p
+          className="flex items-start gap-1 text-slate-700"
+          title="Observación de la dirección"
+        >
+          <span aria-hidden>📍</span>
+          <span className="min-w-0 break-words">{obs}</span>
+        </p>
+      )}
+      {note && (
+        <p
+          className="flex items-start gap-1 text-slate-700"
+          title="Nota del pedido"
+        >
+          <span aria-hidden>📝</span>
+          <span className="min-w-0 break-words">{note}</span>
+        </p>
+      )}
+    </div>
+  )
 }
 
 function stopAddress(stop: RouteStopWithOrder): string {
@@ -713,15 +751,11 @@ export default function RouteDetailPage() {
                       ))}
                     </select>
                     <div className="w-16 shrink-0">
-                      <TextInput
-                        type="number"
-                        min="1"
-                        inputMode="numeric"
+                      <NumberInput
+                        min={1}
                         value={it.quantity}
-                        onChange={(e) =>
-                          updateQuickItem(i, {
-                            quantity: Math.max(1, Number(e.target.value) || 1),
-                          })
+                        onValueChange={(n) =>
+                          updateQuickItem(i, { quantity: n })
                         }
                         className="text-center"
                       />
@@ -856,22 +890,13 @@ export default function RouteDetailPage() {
                     ))}
                   </select>
                   <div className="w-16 shrink-0">
-                    <TextInput
-                      type="number"
-                      min="1"
+                    <NumberInput
+                      min={1}
                       value={it.quantity}
-                      onChange={(e) =>
+                      onValueChange={(n) =>
                         setPickupItems((l) =>
                           l.map((x, idx) =>
-                            idx === i
-                              ? {
-                                  ...x,
-                                  quantity: Math.max(
-                                    1,
-                                    Number(e.target.value) || 1
-                                  ),
-                                }
-                              : x
+                            idx === i ? { ...x, quantity: n } : x
                           )
                         )
                       }
@@ -938,6 +963,7 @@ function StopsTableHead({
         <th className="w-16 px-2 py-2 text-center">Fecha de creación</th>
         <th className="px-3 py-2">Productos</th>
         <th className="px-3 py-2">Dirección</th>
+        <th className="px-3 py-2">Notas</th>
         <th className="px-3 py-2">Teléfono</th>
         <th className="px-3 py-2 text-right">Total</th>
         <th className="px-3 py-2">Estado</th>
@@ -996,6 +1022,7 @@ function StopCells({
             )}
           </div>
         </td>
+        <td className="px-3 py-2 text-center text-slate-300">—</td>
         <td className="px-3 py-2 text-slate-600">
           <div className="flex items-center gap-1">
             <span>{pickup.client?.phone ?? '—'}</span>
@@ -1053,6 +1080,7 @@ function StopCells({
   }
 
   const clientName = order ? orderClientName(order) : 'Pedido'
+  const { note, obs } = orderNoteParts(order)
   return (
     <>
       <td className="px-3 py-2 font-medium text-slate-800">{clientName}</td>
@@ -1084,6 +1112,15 @@ function StopCells({
             </>
           )}
         </div>
+      </td>
+      <td className="px-3 py-2 text-slate-600">
+        {note || obs ? (
+          <div className="max-w-[16rem]">
+            <NoteLines note={note} obs={obs} />
+          </div>
+        ) : (
+          <span className="text-slate-300">—</span>
+        )}
       </td>
       <td className="px-3 py-2 text-slate-600">
         <div className="flex items-center gap-1">
@@ -1317,6 +1354,7 @@ function StopCardInner({
   }
 
   const clientName = order ? orderClientName(order) : 'Pedido'
+  const { note, obs } = orderNoteParts(order)
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
       <div className="flex items-start gap-2">
@@ -1357,6 +1395,11 @@ function StopCardInner({
               <span className="flex-1">{order.client.phone}</span>
               <CallButton phone={order.client.phone} />
               <CopyButton value={order.client.phone} label="Copiar teléfono" />
+            </div>
+          )}
+          {(note || obs) && (
+            <div className="mt-1.5 rounded-lg bg-amber-50 px-2 py-1.5">
+              <NoteLines note={note} obs={obs} />
             </div>
           )}
           {order &&
