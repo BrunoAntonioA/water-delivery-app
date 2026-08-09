@@ -8,6 +8,7 @@ import {
   LOCK_MINUTES,
 } from '../lib/loginGuard'
 import { Turnstile, turnstileConfigured } from '../components/Turnstile'
+import { Logo } from '../components/Logo'
 import { Button, Card, Label, TextInput } from '../components/ui'
 
 function mmss(ms: number): string {
@@ -113,9 +114,11 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
       <Card className="w-full max-w-sm p-6">
         <div className="mb-6 text-center">
-          <div className="mb-2 text-4xl">💧</div>
-          <h1 className="text-xl font-bold text-slate-900">AquaGestión</h1>
-          <p className="text-sm text-slate-500">Inicia sesión para continuar</p>
+          <Logo className="mx-auto mb-3 w-40 max-w-full" />
+          <h1 className="text-2xl font-bold text-slate-900">Gestiona Agua</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Bienvenido de vuelta 👋
+          </p>
         </div>
 
         {!isSupabaseConfigured && (

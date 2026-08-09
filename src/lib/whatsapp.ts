@@ -102,7 +102,7 @@ export function buildWaUrl(phone: string, text: string): string | null {
 /**
  * Abre la app de WhatsApp (móvil o escritorio) con el mensaje ya escrito, usando
  * el deep link `whatsapp://`. No abre WhatsApp Web ni una pestaña nueva: lanza la
- * app instalada y deja AquaGestión cargado atrás. Requiere tener la app de
+ * app instalada y deja Gestiona Agua cargado atrás. Requiere tener la app de
  * WhatsApp instalada. Devuelve false si no hay teléfono válido.
  */
 export function openWhatsApp(phone: string, text: string): boolean {

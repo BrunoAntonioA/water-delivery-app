@@ -29,6 +29,7 @@ import ResetPasswordPage from './pages/ResetPasswordPage'
 import LoginPage from './pages/LoginPage'
 import { VerifyEmailWall } from './components/VerifyEmailWall'
 import { FlowReturnScreen } from './components/FlowReturnScreen'
+import { Logo } from './components/Logo'
 
 const NAV: {
   module: ModuleKey
@@ -240,8 +241,8 @@ export default function App() {
           </button>
 
           <div className="flex min-w-0 flex-1 items-center gap-2 font-bold text-slate-900">
-            <span className="text-xl">💧</span>
-            <span className="truncate">{company?.name ?? 'AquaGestión'}</span>
+            <Logo className="h-7 w-7 shrink-0 object-contain" />
+            <span className="truncate">{company?.name ?? 'Gestiona Agua'}</span>
           </div>
 
           {/* Usuario + salir a la derecha */}
@@ -416,8 +417,11 @@ export default function App() {
           />
           <aside className="absolute inset-y-0 left-0 flex w-64 flex-col overflow-y-auto bg-white p-3 shadow-xl">
             <div className="mb-3 flex items-center justify-between">
-              <span className="min-w-0 break-words font-bold text-slate-900">
-                💧 {company?.name ?? 'AquaGestión'}
+              <span className="flex min-w-0 items-center gap-2 font-bold text-slate-900">
+                <Logo className="h-6 w-6 shrink-0 object-contain" />
+                <span className="min-w-0 break-words">
+                  {company?.name ?? 'Gestiona Agua'}
+                </span>
               </span>
               <button
                 type="button"

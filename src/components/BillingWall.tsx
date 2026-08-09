@@ -2,6 +2,7 @@ import type { Subscription } from '../types/billing'
 import { SUBSCRIPTION_STATUS_LABELS } from '../types/billing'
 import { Button } from './ui'
 import { FlowCheckout } from './FlowCheckout'
+import { Logo } from './Logo'
 
 /**
  * Pantalla de bloqueo cuando la empresa no tiene una suscripción vigente
@@ -34,7 +35,7 @@ export function BillingWall({
     <div className="flex min-h-screen flex-col items-center justify-center gap-6 bg-slate-50 px-4 py-10">
       <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
         <div className="text-center">
-          <div className="mb-4 text-5xl">💧</div>
+          <Logo className="mx-auto mb-4 w-28 max-w-full" />
           <h1 className="text-xl font-bold text-slate-900">{title}</h1>
           <p className="mt-2 text-sm text-slate-500">
             {companyName}

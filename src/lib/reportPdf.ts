@@ -20,7 +20,7 @@ export function makeReportDoc(
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(16)
   doc.setTextColor(15, 23, 42)
-  doc.text(companyName || 'AquaGestión', 14, 18)
+  doc.text(companyName || 'Gestiona Agua', 14, 18)
 
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(13)

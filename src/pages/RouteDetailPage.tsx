@@ -138,6 +138,30 @@ function isPending(stop: RouteStopWithOrder): boolean {
   return !stop.order || stop.order.status === 'ordered'
 }
 
+/** Nombre para mostrar de una parada (cliente o nombre del retiro/venta). */
+function stopTitle(stop: RouteStopWithOrder): string {
+  if (stop.pickup) return stop.pickup.customer_name || 'Retiro'
+  return stop.order ? orderClientName(stop.order) : 'Parada'
+}
+
+/**
+ * Arma el enlace de Google Maps con varias paradas en orden (ruta con
+ * navegación). El origen queda vacío → Maps usa la ubicación actual. La última
+ * dirección es el destino; las anteriores, waypoints. Devuelve null si no hay
+ * direcciones válidas.
+ */
+function googleMapsRouteUrl(addresses: string[]): string | null {
+  const enc = addresses
+    .filter((a) => a && a !== '—')
+    .map((a) => encodeURIComponent(a))
+  if (enc.length === 0) return null
+  const destination = enc[enc.length - 1]
+  const waypoints = enc.slice(0, -1).join('|')
+  let url = `https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=${destination}`
+  if (waypoints) url += `&waypoints=${waypoints}`
+  return url
+}
+
 export default function RouteDetailPage() {
   const { id = '' } = useParams()
   const qc = useQueryClient()
@@ -227,6 +251,25 @@ export default function RouteDetailPage() {
 
   const [addOpen, setAddOpen] = useState(false)
   const [pendingPickupsOpen, setPendingPickupsOpen] = useState(false)
+
+  // Navegar en Google Maps: selección de hasta 10 paradas para abrir la ruta.
+  const MAX_MAPS_STOPS = 10
+  const [mapsOpen, setMapsOpen] = useState(false)
+  const [selectedMapStops, setSelectedMapStops] = useState<Set<string>>(
+    new Set()
+  )
+  function openMapsModal() {
+    setSelectedMapStops(new Set())
+    setMapsOpen(true)
+  }
+  function toggleMapStop(id: string) {
+    setSelectedMapStops((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else if (next.size < MAX_MAPS_STOPS) next.add(id)
+      return next
+    })
+  }
 
   // Venta rápida (sólo nombre + productos).
   const [quickOpen, setQuickOpen] = useState(false)
@@ -424,6 +467,15 @@ export default function RouteDetailPage() {
               🛒 Ver carga
             </Button>
           </Link>
+          {!loadBlocked && pending.length > 0 && (
+            <Button
+              variant="secondary"
+              onClick={openMapsModal}
+              className="flex-1 sm:flex-none"
+            >
+              🧭 Navegar
+            </Button>
+          )}
           {!loadBlocked && !readOnly && (
             <Button
               variant="secondary"
@@ -949,6 +1001,95 @@ export default function RouteDetailPage() {
             </Button>
           </div>
         </form>
+      </Modal>
+
+      {/* --- Navegar en Google Maps (elegir hasta 10 paradas) --- */}
+      <Modal
+        open={mapsOpen}
+        onClose={() => setMapsOpen(false)}
+        title="Navegar en Google Maps"
+        wide
+      >
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm text-slate-500">
+              Selecciona hasta {MAX_MAPS_STOPS} paradas.{' '}
+              <span className="font-semibold text-slate-700">
+                {selectedMapStops.size}/{MAX_MAPS_STOPS}
+              </span>
+            </p>
+            <Button
+              onClick={() => {
+                const stops = pending.filter((s) =>
+                  selectedMapStops.has(s.id)
+                )
+                const url = googleMapsRouteUrl(stops.map(stopAddress))
+                if (url) window.open(url, '_blank', 'noopener')
+              }}
+              disabled={selectedMapStops.size === 0}
+            >
+              🧭 Abrir en Google Maps
+            </Button>
+          </div>
+
+          {selectedMapStops.size >= MAX_MAPS_STOPS && (
+            <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              Llegaste al máximo de {MAX_MAPS_STOPS}. Deselecciona una para
+              elegir otra.
+            </p>
+          )}
+
+          <div className="max-h-96 space-y-2 overflow-y-auto">
+            {pending.map((stop, i) => {
+              const addr = stopAddress(stop)
+              const hasAddr = Boolean(addr) && addr !== '—'
+              const checked = selectedMapStops.has(stop.id)
+              const disabled =
+                !hasAddr ||
+                (!checked && selectedMapStops.size >= MAX_MAPS_STOPS)
+              return (
+                <label
+                  key={stop.id}
+                  className={`flex items-start gap-3 rounded-lg border px-3 py-2 ${
+                    checked
+                      ? 'border-sky-300 bg-sky-50'
+                      : 'border-slate-200'
+                  } ${disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={disabled}
+                    onChange={() => toggleMapStop(stop.id)}
+                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                  />
+                  <div className="min-w-0">
+                    <p className="font-medium text-slate-800">
+                      <span className="text-slate-400">{i + 1}.</span>{' '}
+                      {stopTitle(stop)}
+                    </p>
+                    <p className="text-sm text-slate-500">
+                      {hasAddr ? addr : 'Sin dirección'}
+                    </p>
+                  </div>
+                </label>
+              )
+            })}
+          </div>
+
+          <div className="flex justify-between gap-2 border-t border-slate-100 pt-3">
+            <Button
+              variant="secondary"
+              onClick={() => setSelectedMapStops(new Set())}
+              disabled={selectedMapStops.size === 0}
+            >
+              Limpiar selección
+            </Button>
+            <Button variant="secondary" onClick={() => setMapsOpen(false)}>
+              Volver
+            </Button>
+          </div>
+        </div>
       </Modal>
     </div>
   )
