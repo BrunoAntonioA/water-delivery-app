@@ -334,7 +334,7 @@ export default function OrdersReportPage() {
           </div>
         </div>
 
-        <div className="mt-4 flex gap-6 overflow-x-auto pb-1">
+        <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:gap-6 sm:overflow-x-auto sm:pb-1">
           <div className="shrink-0">
             <Label>Estado</Label>
             <div className="flex gap-1">
