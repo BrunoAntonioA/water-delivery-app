@@ -9,6 +9,7 @@ import {
 } from '../api/orders'
 import { createClient, listClients } from '../api/clients'
 import { listProducts } from '../api/products'
+import { addOrderToRoute, listRoutes, type RouteSummary } from '../api/routes'
 import type { OrderDetail, OrderStatus, PaymentMethod } from '../types/db'
 import {
   formatDate,
@@ -85,6 +86,10 @@ export default function OrdersPage() {
   const { data: products } = useQuery({
     queryKey: ['products'],
     queryFn: listProducts,
+  })
+  const { data: routes } = useQuery({
+    queryKey: ['routes'],
+    queryFn: listRoutes,
   })
 
   const [modalOpen, setModalOpen] = useState(false)
@@ -218,9 +223,29 @@ export default function OrdersPage() {
     },
   })
 
+  // Pedido pendiente de eliminación (confirmación en un modal propio: window.
+  // confirm() no funciona de forma fiable en el móvil / app instalada).
+  const [deleteTarget, setDeleteTarget] = useState<OrderDetail | null>(null)
+
   const deleteMutation = useMutation({
     mutationFn: (id: string) => deleteOrder(id),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      invalidate()
+      setDeleteTarget(null)
+    },
+  })
+
+  // Pedido que se va a agregar a una ruta (abre el modal con las rutas).
+  const [assignTarget, setAssignTarget] = useState<OrderDetail | null>(null)
+
+  const addToRouteMutation = useMutation({
+    mutationFn: ({ orderId, routeId }: { orderId: string; routeId: string }) =>
+      addOrderToRoute(routeId, orderId),
+    onSuccess: () => {
+      invalidate()
+      qc.invalidateQueries({ queryKey: ['routes'] })
+      setAssignTarget(null)
+    },
   })
 
   const createClientMutation = useMutation({
@@ -547,10 +572,7 @@ export default function OrdersPage() {
                     )}
                     <button
                       type="button"
-                      onClick={() => {
-                        if (confirm('¿Eliminar este pedido?'))
-                          deleteMutation.mutate(o.id)
-                      }}
+                      onClick={() => setDeleteTarget(o)}
                       aria-label="Eliminar pedido"
                       className="rounded-lg px-2 py-1 text-slate-400 hover:bg-slate-100 hover:text-red-600"
                     >
@@ -585,11 +607,20 @@ export default function OrdersPage() {
                       </p>
                     )
                   )}
-                  <OrderActions
-                    order={o}
-                    onChanged={invalidate}
-                    className="mt-2 flex flex-wrap items-center gap-2"
-                  />
+                  {o.routeDate ? (
+                    <OrderActions
+                      order={o}
+                      onChanged={invalidate}
+                      className="mt-2 flex flex-wrap items-center gap-2"
+                    />
+                  ) : (
+                    <Button
+                      className="mt-2 w-full"
+                      onClick={() => setAssignTarget(o)}
+                    >
+                      🚚 Agregar a ruta
+                    </Button>
+                  )}
                 </div>
               </Card>
             )
@@ -629,10 +660,8 @@ export default function OrdersPage() {
                       o={o}
                       onChanged={invalidate}
                       onEdit={canEditOrder(o) ? () => openEdit(o) : undefined}
-                      onDelete={() => {
-                        if (confirm('¿Eliminar este pedido?'))
-                          deleteMutation.mutate(o.id)
-                      }}
+                      onDelete={() => setDeleteTarget(o)}
+                      onAddToRoute={() => setAssignTarget(o)}
                     />
                   ))}
                 </tbody>
@@ -646,6 +675,70 @@ export default function OrdersPage() {
           />
         </>
       )}
+
+      {/* Agregar el pedido a una ruta (mientras no esté en una, se bloquean las
+          acciones de entrega/pago) */}
+      <Modal
+        open={assignTarget != null}
+        onClose={() => setAssignTarget(null)}
+        title="Agregar pedido a una ruta"
+        wide
+      >
+        {addToRouteMutation.isError && (
+          <p className="mb-3 text-sm text-red-600">
+            Error: {(addToRouteMutation.error as Error).message}
+          </p>
+        )}
+        <AddToRouteList
+          routes={routes ?? []}
+          onAdd={(routeId) =>
+            assignTarget &&
+            addToRouteMutation.mutate({ orderId: assignTarget.id, routeId })
+          }
+          isPending={addToRouteMutation.isPending}
+        />
+      </Modal>
+
+      {/* Confirmación de borrado (en vez de window.confirm, que falla en móvil) */}
+      <Modal
+        open={deleteTarget != null}
+        onClose={() => setDeleteTarget(null)}
+        title="Eliminar pedido"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">
+            ¿Eliminar el pedido de{' '}
+            <span className="font-semibold">
+              {deleteTarget ? orderClientName(deleteTarget) : ''}
+            </span>
+            ? Esta acción no se puede deshacer.
+          </p>
+          {deleteMutation.isError && (
+            <p className="text-sm text-red-600">
+              Error al eliminar: {(deleteMutation.error as Error).message}
+            </p>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setDeleteTarget(null)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
+              disabled={deleteMutation.isPending}
+              onClick={() =>
+                deleteTarget && deleteMutation.mutate(deleteTarget.id)
+              }
+            >
+              {deleteMutation.isPending ? 'Eliminando…' : 'Eliminar'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       <Modal
         open={modalOpen}
@@ -954,11 +1047,13 @@ function OrderRow({
   onChanged,
   onEdit,
   onDelete,
+  onAddToRoute,
 }: {
   o: OrderDetail
   onChanged: () => void
   onEdit?: () => void
   onDelete: () => void
+  onAddToRoute: () => void
 }) {
   const clientName = orderClientName(o)
   const addressFull = o.address
@@ -1030,11 +1125,17 @@ function OrderRow({
         </div>
       </td>
       <td className="px-3 py-2">
-        <OrderActions
-          order={o}
-          onChanged={onChanged}
-          className="mx-auto flex w-40 flex-col items-stretch gap-1"
-        />
+        {o.routeDate ? (
+          <OrderActions
+            order={o}
+            onChanged={onChanged}
+            className="mx-auto flex w-40 flex-col items-stretch gap-1"
+          />
+        ) : (
+          <Button className="mx-auto w-40" onClick={onAddToRoute}>
+            🚚 Agregar a ruta
+          </Button>
+        )}
       </td>
       <td className="px-2 py-2">
         <div className="flex items-center justify-center gap-1">
@@ -1059,5 +1160,54 @@ function OrderRow({
         </div>
       </td>
     </tr>
+  )
+}
+
+/** Lista de rutas ABIERTAS para asignarles el pedido. */
+function AddToRouteList({
+  routes,
+  onAdd,
+  isPending,
+}: {
+  routes: RouteSummary[]
+  onAdd: (routeId: string) => void
+  isPending: boolean
+}) {
+  const open = routes.filter((r) => !r.closed_at)
+  if (open.length === 0) {
+    return (
+      <p className="py-6 text-center text-sm text-slate-500">
+        No hay rutas abiertas. Crea una ruta en el módulo Rutas y vuelve a
+        intentarlo.
+      </p>
+    )
+  }
+  return (
+    <div className="max-h-96 space-y-2 overflow-y-auto">
+      {open.map((r) => (
+        <div
+          key={r.id}
+          className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2"
+        >
+          <div className="min-w-0">
+            <p className="truncate font-medium text-slate-800">
+              {r.name || 'Ruta sin nombre'}
+            </p>
+            <p className="truncate text-sm text-slate-500">
+              📅 {formatDateShort(r.route_date)} · 🚚{' '}
+              {r.driverName || 'Sin repartidor'} · {r.stopCount}{' '}
+              {r.stopCount === 1 ? 'parada' : 'paradas'}
+            </p>
+          </div>
+          <Button
+            variant="secondary"
+            onClick={() => onAdd(r.id)}
+            disabled={isPending}
+          >
+            Agregar
+          </Button>
+        </div>
+      ))}
+    </div>
   )
 }

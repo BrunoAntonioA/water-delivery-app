@@ -998,11 +998,16 @@ function RepartidoresTab({
 
   const summary = useMemo(() => {
     if (!driverId) return null
+    // "__all__" = todos los repartidores (se agregan las cifras de todos).
+    const isAll = driverId === '__all__'
+    const driverIdSet = new Set(drivers.map((d) => d.id))
+    const matches = (id: string | null | undefined) =>
+      isAll ? Boolean(id && driverIdSet.has(id)) : id === driverId
     let efectivo = 0
     const productQty = new Map<string, { name: string; qty: number }>()
     const supplyQty = new Map<string, number>()
     for (const o of orders) {
-      if (o.driverId !== driverId) continue
+      if (!matches(o.driverId)) continue
       // Se filtra por la FECHA DE LA RUTA (igual que la "Carga de la ruta" y el
       // módulo Entregas). Los pedidos fuera de ruta no tienen fecha de ruta, así
       // que sólo entran cuando no hay filtro de fechas.
@@ -1033,7 +1038,7 @@ function RepartidoresTab({
     }
     let costos = 0
     for (const c of costs) {
-      if (c.created_by !== driverId) continue
+      if (!matches(c.created_by)) continue
       if (fromDate && c.issue_date < fromDate) continue
       if (toDate && c.issue_date > toDate) continue
       costos += Number(c.amount)
@@ -1046,14 +1051,16 @@ function RepartidoresTab({
       qty,
     })).sort((a, b) => b.qty - a.qty)
     return { efectivo, costos, balance: efectivo - costos, productos, insumos }
-  }, [driverId, orders, costs, fromDate, toDate, productSupply, supplyName])
+  }, [driverId, drivers, orders, costs, fromDate, toDate, productSupply, supplyName])
 
   function exportPdf() {
     if (!summary) return
     const driverName =
-      drivers.find((d) => d.id === driverId)?.full_name ||
-      drivers.find((d) => d.id === driverId)?.email ||
-      'Repartidor'
+      driverId === '__all__'
+        ? 'Todos los repartidores'
+        : drivers.find((d) => d.id === driverId)?.full_name ||
+          drivers.find((d) => d.id === driverId)?.email ||
+          'Repartidor'
     const periodo =
       fromDate || toDate
         ? `Período: ${fromDate || 'inicio'} a ${toDate || 'hoy'}`
@@ -1110,6 +1117,7 @@ function RepartidoresTab({
               className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
             >
               <option value="">Selecciona un repartidor…</option>
+              <option value="__all__">Todos los repartidores</option>
               {drivers.map((d) => (
                 <option key={d.id} value={d.id}>
                   {d.full_name || d.email || 'Sin nombre'}
