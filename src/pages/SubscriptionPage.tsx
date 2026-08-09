@@ -8,6 +8,7 @@ import {
   type SubscriptionStatus,
 } from '../types/billing'
 import { Card, EmptyState, PageHeader, Spinner } from '../components/ui'
+import { FlowCheckout } from '../components/FlowCheckout'
 
 // Número de contacto (WhatsApp) para solicitudes de pago/activación.
 const CONTACT_WHATSAPP = '56945652653'
@@ -65,7 +66,10 @@ export default function SubscriptionPage() {
             </p>
             {plan && (
               <p className="mt-0.5 text-sm text-slate-500">
-                {formatMoney(plan.price)} / mes
+                {formatMoney(subscription?.custom_price ?? plan.price)} / mes
+                {subscription?.custom_price != null && (
+                  <span className="ml-1 text-sky-600">(precio especial)</span>
+                )}
               </p>
             )}
           </div>
@@ -118,6 +122,15 @@ export default function SubscriptionPage() {
         <p className="mt-2 text-xs text-slate-400">
           Escríbenos y coordinamos el pago para renovar o activar tu plan.
         </p>
+      </Card>
+
+      {/* Pagar / renovar en línea con Flow */}
+      <Card className="mb-6 p-5">
+        <h2 className="font-semibold text-slate-900">Pagar o renovar</h2>
+        <p className="mb-3 mt-0.5 text-sm text-slate-500">
+          Paga en línea con Flow y tu acceso se renueva al confirmarse el pago.
+        </p>
+        <FlowCheckout currentPlanKey={plan?.key ?? null} />
       </Card>
 
       {/* Pagos registrados */}

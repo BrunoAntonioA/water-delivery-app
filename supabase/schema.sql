@@ -438,6 +438,9 @@ create table if not exists subscriptions (
   updated_at               timestamptz not null default now()
 );
 create index if not exists subscriptions_company_id_idx on subscriptions (company_id);
+-- Precio especial negociado para esta empresa (lo fija el superadmin). Si está
+-- definido, la empresa paga ESTE monto con Flow en vez del precio del plan.
+alter table subscriptions add column if not exists custom_price numeric(12, 2);
 
 -- Pagos de la suscripción (registro manual mientras no está integrado Flow). La
 -- empresa los ve en su módulo "Suscripción"; sólo el superadmin los registra.
@@ -454,6 +457,34 @@ create table if not exists subscription_payments (
 );
 create index if not exists subscription_payments_company_id_idx
   on subscription_payments (company_id);
+
+-- Intentos de pago con Flow: un registro por cada cobro iniciado. Los escriben
+-- SÓLO las Edge Functions con service role (flow-create-payment / flow-confirm);
+-- la empresa puede LEER los suyos aunque su suscripción esté vencida (por eso el
+-- policy usa my_company_id(), no current_company_id()). company_id NO usa el
+-- default current_company_id() a propósito: quien paga suele estar vencido (esa
+-- función devolvería null); la Edge Function lo setea explícitamente.
+create table if not exists payment_intents (
+  id             uuid primary key default gen_random_uuid(),
+  company_id     uuid not null references companies (id) on delete cascade,
+  plan_id        uuid references plans (id),
+  amount         numeric(12, 2) not null,
+  currency       text not null default 'CLP',
+  months         integer not null default 1,        -- período que cubre el pago
+  status         text not null default 'pending'
+    check (status in ('pending','paid','failed','canceled')),
+  commerce_order text not null unique,               -- commerceOrder enviado a Flow
+  flow_token     text,                               -- token que devuelve Flow
+  flow_order     text,                               -- flowOrder (nº de orden Flow)
+  paid_at        timestamptz,
+  created_by     uuid references profiles (id) on delete set null,
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now()
+);
+create index if not exists payment_intents_company_id_idx
+  on payment_intents (company_id);
+create index if not exists payment_intents_commerce_order_idx
+  on payment_intents (commerce_order);
 
 -- ----------------------------------------------------------------------------
 --  Perfiles: enlaza cada usuario de Supabase Auth con su empresa y rol.
@@ -1205,6 +1236,16 @@ create policy "sub_payments_read" on subscription_payments for select
   using (is_superadmin() or company_id = my_company_id());
 drop policy if exists "sub_payments_superadmin" on subscription_payments;
 create policy "sub_payments_superadmin" on subscription_payments for all
+  using (is_superadmin()) with check (is_superadmin());
+
+-- Intentos de pago: la empresa lee los suyos (aunque esté vencida); las Edge
+-- Functions escriben con service role (saltan RLS). Sólo el superadmin gestiona.
+alter table payment_intents enable row level security;
+drop policy if exists "payment_intents_read" on payment_intents;
+create policy "payment_intents_read" on payment_intents for select
+  using (is_superadmin() or company_id = my_company_id());
+drop policy if exists "payment_intents_superadmin" on payment_intents;
+create policy "payment_intents_superadmin" on payment_intents for all
   using (is_superadmin()) with check (is_superadmin());
 
 drop policy if exists "companies_superadmin" on companies;

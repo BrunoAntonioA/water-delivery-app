@@ -49,6 +49,9 @@ export interface Subscription {
   activated_at: string | null
   canceled_at: string | null
   notes: string | null
+  // Precio especial negociado (lo fija el superadmin). Si está definido, la
+  // empresa paga este monto en vez del precio del plan.
+  custom_price: number | null
   created_at: string
   updated_at: string
   // Cargado con embed cuando se consulta con el plan.

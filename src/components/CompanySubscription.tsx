@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   addSubscriptionPayment,
   deleteSubscriptionPayment,
@@ -42,6 +42,12 @@ export function CompanySubscription({ companyId }: { companyId: string }) {
   })
 
   const [until, setUntil] = useState('')
+
+  // Precio especial de la empresa (se sincroniza al cargar la suscripción).
+  const [customPrice, setCustomPrice] = useState('')
+  useEffect(() => {
+    setCustomPrice(sub?.custom_price != null ? String(sub.custom_price) : '')
+  }, [sub?.custom_price])
 
   // --- Pagos registrados ---
   const { data: payments } = useQuery({
@@ -149,6 +155,54 @@ export function CompanySubscription({ companyId }: { companyId: string }) {
             </option>
           ))}
         </select>
+      </div>
+
+      {/* Precio especial (opcional): la empresa paga este monto con Flow */}
+      <div className="mb-4">
+        <Label>Precio especial (opcional)</Label>
+        <div className="flex flex-wrap items-end gap-2">
+          <TextInput
+            type="number"
+            min="0"
+            step="1"
+            value={customPrice}
+            onChange={(e) => setCustomPrice(e.target.value)}
+            placeholder={
+              selectedPlan ? String(selectedPlan.price) : 'Precio del plan'
+            }
+            className="sm:w-44"
+          />
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={busy}
+            onClick={() =>
+              save.mutate({
+                custom_price:
+                  customPrice.trim() === '' ? null : Number(customPrice),
+              })
+            }
+          >
+            Guardar precio
+          </Button>
+          {sub?.custom_price != null && (
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={busy}
+              onClick={() => {
+                setCustomPrice('')
+                save.mutate({ custom_price: null })
+              }}
+            >
+              Quitar
+            </Button>
+          )}
+        </div>
+        <p className="mt-1 text-xs text-slate-400">
+          Si defines un precio especial, la empresa pagará ese monto (en vez del
+          precio del plan) al pagar con Flow. Requiere tener un plan asignado.
+        </p>
       </div>
 
       {/* Acciones de activación */}

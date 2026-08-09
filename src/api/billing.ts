@@ -50,6 +50,7 @@ export interface SubscriptionPatch {
   activated_at?: string | null
   canceled_at?: string | null
   notes?: string | null
+  custom_price?: number | null
 }
 
 /**
@@ -106,6 +107,35 @@ export async function signupCompany(input: SignupInput): Promise<void> {
     }
     throw new Error(message)
   }
+}
+
+// --- Pago en línea con Flow ---
+
+/**
+ * Inicia un pago del plan indicado con Flow (Edge Function flow-create-payment).
+ * Devuelve la URL de Flow a la que hay que redirigir el navegador. El monto lo
+ * fija el servidor según el plan; aquí sólo se manda la clave del plan.
+ */
+export async function startFlowPayment(planKey: string): Promise<string> {
+  const { data, error } = await supabase.functions.invoke('flow-create-payment', {
+    body: { planKey },
+  })
+  if (error) {
+    let message = error.message
+    const context = (error as { context?: Response }).context
+    if (context && typeof context.json === 'function') {
+      try {
+        const body = await context.json()
+        if (body?.error) message = body.error
+      } catch {
+        /* sin cuerpo JSON */
+      }
+    }
+    throw new Error(message)
+  }
+  const redirectUrl = (data as { redirectUrl?: string } | null)?.redirectUrl
+  if (!redirectUrl) throw new Error('No se recibió la URL de pago de Flow')
+  return redirectUrl
 }
 
 // --- Pagos de la suscripción (registro manual) ---

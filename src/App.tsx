@@ -28,6 +28,7 @@ import SignupPage from './pages/SignupPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
 import LoginPage from './pages/LoginPage'
 import { VerifyEmailWall } from './components/VerifyEmailWall'
+import { FlowReturnScreen } from './components/FlowReturnScreen'
 
 const NAV: {
   module: ModuleKey
@@ -167,6 +168,13 @@ export default function App() {
     return (
       <VerifyEmailWall email={session.user.email ?? ''} onSignOut={signOut} />
     )
+  }
+
+  // Retorno desde Flow (…/suscripcion?flow=return): se resuelve el estado del
+  // pago (el webhook confirma de forma asíncrona) ANTES del muro de pago, para
+  // que un usuario recién pagado no quede atrapado en el bloqueo.
+  if (new URLSearchParams(location.search).get('flow') === 'return') {
+    return <FlowReturnScreen />
   }
 
   // Muro de pago: si la empresa no tiene suscripción vigente (prueba vencida,
