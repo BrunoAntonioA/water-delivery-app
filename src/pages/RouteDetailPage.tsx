@@ -418,37 +418,44 @@ export default function RouteDetailPage() {
           )}
         </div>
         <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:shrink-0">
+          {/* Acciones secundarias (blancas) primero; los CTA de color al final. */}
           <Link to={`/rutas/${id}/carga`} className="flex-1 sm:flex-none">
             <Button variant="secondary" className="w-full">
               🛒 Ver carga
             </Button>
           </Link>
           {!loadBlocked && !readOnly && (
-            <>
-              <Button
-                variant="success"
-                onClick={openQuick}
-                className="flex-1 sm:flex-none"
-              >
-                ⚡ Venta rápida
-              </Button>
+            <Button
+              variant="secondary"
+              onClick={openPickup}
+              className="flex-1 sm:flex-none"
+            >
+              🔄 Retiro
+            </Button>
+          )}
+          {!loadBlocked &&
+            !readOnly &&
+            canManage &&
+            (pendingPickups?.length ?? 0) > 0 && (
               <Button
                 variant="secondary"
-                onClick={openPickup}
+                onClick={() => setPendingPickupsOpen(true)}
                 className="flex-1 sm:flex-none"
               >
-                🔄 Retiro
+                📋 Retiros pendientes
+                <span className="ml-0.5 rounded-full bg-slate-200 px-1.5 py-0.5 text-xs font-semibold text-slate-700">
+                  {pendingPickups?.length ?? 0}
+                </span>
               </Button>
-              {canManage && (pendingPickups?.length ?? 0) > 0 && (
-                <Button
-                  variant="secondary"
-                  onClick={() => setPendingPickupsOpen(true)}
-                  className="flex-1 sm:flex-none"
-                >
-                  📋 Retiros pendientes ({pendingPickups?.length ?? 0})
-                </Button>
-              )}
-            </>
+            )}
+          {!loadBlocked && !readOnly && (
+            <Button
+              variant="success"
+              onClick={openQuick}
+              className="flex-1 sm:flex-none"
+            >
+              ⚡ Venta rápida
+            </Button>
           )}
           {canManage && (
             <Button

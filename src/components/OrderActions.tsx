@@ -173,21 +173,10 @@ export function OrderActions({
   return (
     <>
       <div className={className}>
-        {canCharge && (
-          <Button
-            variant="success"
-            onClick={() => setChargeOpen(true)}
-            aria-label="Cobrar por WhatsApp"
-            title="Cobrar por WhatsApp"
-          >
-            <WhatsAppIcon /> Cobrar
-          </Button>
-        )}
-
-        {/* Entrega */}
+        {/* Entrega (acción principal) */}
         {order.status === 'ordered' ? (
           <Button onClick={openDeliver} disabled={busy}>
-            Marcar Entregado
+            <CheckIcon /> Marcar Entregado
           </Button>
         ) : (
           <Button
@@ -202,8 +191,8 @@ export function OrderActions({
 
         {/* Pago (independiente de la entrega) */}
         {!order.paid ? (
-          <Button onClick={openPay} disabled={busy}>
-            Marcar Pagado
+          <Button variant="success" onClick={openPay} disabled={busy}>
+            <CashIcon /> Marcar Pagado
           </Button>
         ) : (
           <Button
@@ -214,6 +203,19 @@ export function OrderActions({
           >
             <UndoIcon /> Deshacer pago
           </Button>
+        )}
+
+        {/* Cobrar por WhatsApp: acción secundaria (sólo si aún no ha pagado) */}
+        {canCharge && (
+          <button
+            type="button"
+            onClick={() => setChargeOpen(true)}
+            aria-label="Cobrar por WhatsApp"
+            title="Cobrar por WhatsApp"
+            className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-emerald-500 px-3.5 py-2 text-sm font-medium text-emerald-700 transition-colors hover:bg-emerald-50"
+          >
+            <WhatsAppIcon /> Cobrar
+          </button>
         )}
       </div>
 
@@ -607,6 +609,51 @@ function UndoIcon() {
         strokeLinecap="round"
         strokeLinejoin="round"
       />
+    </svg>
+  )
+}
+
+function CheckIcon() {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      className="shrink-0"
+      aria-hidden
+    >
+      <path
+        d="M5 13l4 4L19 7"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+function CashIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      className="shrink-0"
+      aria-hidden
+    >
+      <rect
+        x="2.5"
+        y="6"
+        width="19"
+        height="12"
+        rx="2"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+      <circle cx="12" cy="12" r="2.4" stroke="currentColor" strokeWidth="2" />
     </svg>
   )
 }

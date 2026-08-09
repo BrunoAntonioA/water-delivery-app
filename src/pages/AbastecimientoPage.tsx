@@ -272,16 +272,6 @@ export default function AbastecimientoPage() {
       {/* --- Filtros --- */}
       <Card className="mb-4 p-4">
         <div className="grid gap-4 sm:grid-cols-2 sm:items-start">
-          <DateRangeFilter
-            from={fromDate}
-            to={toDate}
-            onChange={(f, t) => {
-              setFromDate(f)
-              setToDate(t)
-              setPage(1)
-            }}
-            label="Fecha"
-          />
           <div>
             <Label>Proveedor</Label>
             <select
@@ -301,6 +291,16 @@ export default function AbastecimientoPage() {
               ))}
             </select>
           </div>
+          <DateRangeFilter
+            from={fromDate}
+            to={toDate}
+            onChange={(f, t) => {
+              setFromDate(f)
+              setToDate(t)
+              setPage(1)
+            }}
+            label="Fecha"
+          />
         </div>
         {hasFilters && (
           <div className="mt-3">

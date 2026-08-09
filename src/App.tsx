@@ -29,14 +29,19 @@ import ResetPasswordPage from './pages/ResetPasswordPage'
 import LoginPage from './pages/LoginPage'
 import { VerifyEmailWall } from './components/VerifyEmailWall'
 
-const NAV: { module: ModuleKey; to: string; label: string; icon: string }[] = [
+const NAV: {
+  module: ModuleKey
+  to: string
+  label: string
+  icon: React.ReactNode
+}[] = [
   { module: 'rutas', to: '/rutas', label: 'Rutas', icon: '🚚' },
   { module: 'entregas', to: '/entregas', label: 'Entregas', icon: '📋' },
   { module: 'pedidos', to: '/pedidos', label: 'Pedidos', icon: '📦' },
   { module: 'clientes', to: '/clientes', label: 'Clientes', icon: '👥' },
   { module: 'productos', to: '/productos', label: 'Productos', icon: '💧' },
   { module: 'costos', to: '/costos', label: 'Costos', icon: '💸' },
-  { module: 'abastecimiento', to: '/abastecimiento', label: 'Abastecimiento', icon: '🛒' },
+  { module: 'abastecimiento', to: '/abastecimiento', label: 'Abastecimiento', icon: '🚰' },
   { module: 'reportes', to: '/reportes', label: 'Reportes', icon: '📊' },
   { module: 'plantillas', to: '/plantillas', label: 'Plantillas', icon: '💬' },
   { module: 'usuarios', to: '/usuarios', label: 'Usuarios', icon: '🔑' },
