@@ -7,8 +7,9 @@ import type {
   RouteDetail,
 } from '../types/db'
 
+// Sólo las columnas que consume la UI (ahorro de egress).
 const ORDER_SELECT =
-  'order:orders(*, client:clients(*), address:addresses(*), items:order_items(*, product:products(*)))'
+  'order:orders(*, client:clients(id, name, surname, phone), address:addresses(id, address, comuna, observation), items:order_items(id, product_id, quantity, unit_price, product:products(id, name)))'
 
 export interface RouteInput {
   name: string
@@ -68,59 +69,130 @@ function driverNameOf(p: DriverProfile, fallback: string | null): string | null 
   return p?.full_name || p?.email || fallback
 }
 
+// Embed mínimo para las tarjetas de ruta: sólo lo necesario para los contadores.
+const ROUTE_SUMMARY_SELECT =
+  '*, stops:route_stops(id, order:orders(status, paid, notes, address:addresses(observation)), pickup:route_pickups(done)), driver_profile:profiles!driver_id(full_name, email)'
+
+type RouteSummaryRow = Route & {
+  stops: {
+    id: string
+    order: {
+      status: OrderStatus
+      paid: boolean
+      notes: string | null
+      address: { observation: string | null } | null
+    } | null
+    pickup: { done: boolean } | null
+  }[]
+  driver_profile: DriverProfile
+}
+
+function toRouteSummary(r: RouteSummaryRow): RouteSummary {
+  const { stops, driver_profile, ...route } = r
+  const list = stops ?? []
+  // Los pedidos y los retiros se cuentan por separado.
+  const deliveredCount = list.filter(
+    (s) => s.order && s.order.status !== 'ordered'
+  ).length
+  const paidCount = list.filter((s) => s.order?.paid).length
+  // Pedidos con nota u observación de entrega (para avisar en la lista).
+  const notesCount = list.filter(
+    (s) =>
+      (s.order?.notes && s.order.notes.trim()) ||
+      (s.order?.address?.observation && s.order.address.observation.trim())
+  ).length
+  return {
+    ...route,
+    stopCount: list.length,
+    orderCount: list.filter((s) => s.order).length,
+    deliveredCount,
+    paidCount,
+    pickupCount: list.filter((s) => s.pickup).length,
+    pickupDoneCount: list.filter((s) => s.pickup?.done).length,
+    notesCount,
+    driverName: driverNameOf(driver_profile, route.driver),
+  }
+}
+
 export async function listRoutes(): Promise<RouteSummary[]> {
   const { data, error } = await supabase
     .from('routes')
-    .select(
-      '*, stops:route_stops(id, order:orders(status, paid, notes, address:addresses(observation)), pickup:route_pickups(done)), driver_profile:profiles!driver_id(full_name, email)'
-    )
+    .select(ROUTE_SUMMARY_SELECT)
     .order('route_date', { ascending: false })
   if (error) throw error
-  return (data ?? []).map((r) => {
-    const { stops, driver_profile, ...route } = r as Route & {
-      stops: {
-        id: string
-        order: {
-          status: OrderStatus
-          paid: boolean
-          notes: string | null
-          address: { observation: string | null } | null
-        } | null
-        pickup: { done: boolean } | null
-      }[]
-      driver_profile: DriverProfile
-    }
-    const list = stops ?? []
-    // Los pedidos y los retiros se cuentan por separado.
-    const deliveredCount = list.filter(
-      (s) => s.order && s.order.status !== 'ordered'
-    ).length
-    const paidCount = list.filter((s) => s.order?.paid).length
-    // Pedidos con nota u observación de entrega (para avisar en la lista).
-    const notesCount = list.filter(
-      (s) =>
-        (s.order?.notes && s.order.notes.trim()) ||
-        (s.order?.address?.observation && s.order.address.observation.trim())
-    ).length
-    return {
-      ...route,
-      stopCount: list.length,
-      orderCount: list.filter((s) => s.order).length,
-      deliveredCount,
-      paidCount,
-      pickupCount: list.filter((s) => s.pickup).length,
-      pickupDoneCount: list.filter((s) => s.pickup?.done).length,
-      notesCount,
-      driverName: driverNameOf(driver_profile, route.driver),
-    }
-  })
+  return ((data ?? []) as RouteSummaryRow[]).map(toRouteSummary)
+}
+
+export interface RoutesPageResult {
+  rows: RouteSummary[]
+  total: number
+}
+
+/**
+ * Rutas paginadas y filtradas por fecha EN EL SERVIDOR: sólo se descarga la
+ * página visible (con sus paradas), no todas las rutas. Reduce mucho el egress.
+ */
+export async function listRoutesPage(opts: {
+  from?: string
+  to?: string
+  limit: number
+  offset: number
+}): Promise<RoutesPageResult> {
+  let q = supabase
+    .from('routes')
+    .select(ROUTE_SUMMARY_SELECT, { count: 'exact' })
+    .order('route_date', { ascending: false })
+  if (opts.from) q = q.gte('route_date', opts.from)
+  if (opts.to) q = q.lte('route_date', opts.to)
+  const { data, error, count } = await q.range(
+    opts.offset,
+    opts.offset + opts.limit - 1
+  )
+  if (error) throw error
+  return {
+    rows: ((data ?? []) as RouteSummaryRow[]).map(toRouteSummary),
+    total: count ?? 0,
+  }
+}
+
+/** Opción ligera de ruta ABIERTA para el selector "Agregar a ruta" de Pedidos. */
+export interface OpenRouteOption {
+  id: string
+  name: string | null
+  route_date: string
+  driverName: string | null
+}
+
+/** Rutas abiertas (sin cerrar), sin embeds pesados: sólo para el selector. */
+export async function listOpenRoutes(): Promise<OpenRouteOption[]> {
+  const { data, error } = await supabase
+    .from('routes')
+    .select(
+      'id, name, route_date, driver, driver_profile:profiles!driver_id(full_name, email)'
+    )
+    .is('closed_at', null)
+    .order('route_date', { ascending: false })
+  if (error) throw error
+  type Row = {
+    id: string
+    name: string | null
+    route_date: string
+    driver: string | null
+    driver_profile: DriverProfile
+  }
+  return ((data ?? []) as unknown as Row[]).map((r) => ({
+    id: r.id,
+    name: r.name,
+    route_date: r.route_date,
+    driverName: driverNameOf(r.driver_profile, r.driver),
+  }))
 }
 
 export async function getRoute(id: string): Promise<RouteDetail> {
   const { data, error } = await supabase
     .from('routes')
     .select(
-      `*, stops:route_stops(*, ${ORDER_SELECT}, pickup:route_pickups(*, client:clients(*))), loads:route_loads(*), driver_profile:profiles!driver_id(full_name, email)`
+      `*, stops:route_stops(*, ${ORDER_SELECT}, pickup:route_pickups(*, client:clients(id, name, surname, phone))), loads:route_loads(*), driver_profile:profiles!driver_id(full_name, email)`
     )
     .eq('id', id)
     .single()
@@ -431,7 +503,7 @@ export async function listAssignableOrders(): Promise<OrderDetail[]> {
   const { data, error } = await supabase
     .from('orders')
     .select(
-      '*, client:clients(*), address:addresses(*), items:order_items(*, product:products(*))'
+      '*, client:clients(id, name, surname, phone), address:addresses(id, address, comuna, observation), items:order_items(id, product_id, quantity, unit_price, product:products(id, name))'
     )
     .order('created_at', { ascending: false })
   if (error) throw error

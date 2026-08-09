@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   closeRoute,
@@ -7,7 +7,7 @@ import {
   deleteRoute,
   driverLabel,
   listDrivers,
-  listRoutes,
+  listRoutesPage,
   setRouteDriver,
   type RouteInput,
   type RouteSummary,
@@ -52,10 +52,26 @@ export default function RoutesPage() {
   const isRepartidor = profile?.role === 'repartidor'
   const canManage = !isRepartidor // admin gestiona rutas
 
-  const { data: routes, isLoading } = useQuery({
-    queryKey: ['routes'],
-    queryFn: listRoutes,
+  // Filtros y paginación (server-side: sólo se descarga la página visible).
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [page, setPage] = useState(1)
+
+  const { data: routesPage, isLoading } = useQuery({
+    queryKey: ['routes', { from: dateFrom, to: dateTo, page }],
+    queryFn: () =>
+      listRoutesPage({
+        from: dateFrom || undefined,
+        to: dateTo || undefined,
+        limit: PAGE_SIZE,
+        offset: (page - 1) * PAGE_SIZE,
+      }),
   })
+  const pageItems = routesPage?.rows ?? []
+  const total = routesPage?.total ?? 0
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const currentPage = Math.min(page, pageCount)
+
   const { data: drivers } = useQuery({
     queryKey: ['drivers'],
     queryFn: listDrivers,
@@ -136,26 +152,6 @@ export default function RoutesPage() {
     setModalOpen(true)
   }
 
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
-  const [page, setPage] = useState(1)
-
-  const filtered = useMemo(
-    () =>
-      (routes ?? []).filter(
-        (r) =>
-          (!dateFrom || r.route_date >= dateFrom) &&
-          (!dateTo || r.route_date <= dateTo)
-      ),
-    [routes, dateFrom, dateTo]
-  )
-  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
-  const currentPage = Math.min(page, pageCount)
-  const pageItems = filtered.slice(
-    (currentPage - 1) * PAGE_SIZE,
-    currentPage * PAGE_SIZE
-  )
-
   return (
     <div>
       <PageHeader
@@ -197,14 +193,14 @@ export default function RoutesPage() {
             <span />
           )}
           <span className="text-sm text-slate-400">
-            {filtered.length} {filtered.length === 1 ? 'ruta' : 'rutas'}
+            {total} {total === 1 ? 'ruta' : 'rutas'}
           </span>
         </div>
       </Card>
 
       {isLoading ? (
         <Spinner />
-      ) : filtered.length === 0 ? (
+      ) : total === 0 ? (
         <EmptyState>
           {dateFrom || dateTo
             ? 'No hay rutas en esas fechas.'

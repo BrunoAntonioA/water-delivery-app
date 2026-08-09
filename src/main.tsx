@@ -8,7 +8,15 @@ import { AuthProvider } from './lib/auth.tsx'
 
 const queryClient = new QueryClient({
   defaultOptions: {
-    queries: { refetchOnWindowFocus: false, retry: 1 },
+    queries: {
+      refetchOnWindowFocus: false,
+      retry: 1,
+      // Ahorro de egress (Supabase): las listas grandes no se vuelven a
+      // descargar al remontar/navegar dentro de esta ventana. Las escrituras
+      // invalidan sus claves explícitamente, así que los datos siguen frescos
+      // después de una acción del usuario.
+      staleTime: 5 * 60_000,
+    },
   },
 })
 

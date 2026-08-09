@@ -1,15 +1,24 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useMemo, useState } from 'react'
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
+import { useEffect, useMemo, useState } from 'react'
 import {
   createOrder,
   deleteOrder,
-  listOrders,
+  listOrdersPage,
   updateOrder,
   type OrderItemInput,
 } from '../api/orders'
 import { createClient, listClients } from '../api/clients'
 import { listProducts } from '../api/products'
-import { addOrderToRoute, listRoutes, type RouteSummary } from '../api/routes'
+import {
+  addOrderToRoute,
+  listOpenRoutes,
+  type OpenRouteOption,
+} from '../api/routes'
 import type { OrderDetail, OrderStatus, PaymentMethod } from '../types/db'
 import {
   formatDate,
@@ -17,7 +26,6 @@ import {
   formatDateShort,
   formatMoney,
   formatTimePart,
-  toLocalDateStr,
 } from '../lib/format'
 import { useIsMobile } from '../lib/useIsMobile'
 import {
@@ -75,10 +83,6 @@ export default function OrdersPage() {
   const qc = useQueryClient()
   const isMobile = useIsMobile()
 
-  const { data: orders, isLoading } = useQuery({
-    queryKey: ['orders'],
-    queryFn: listOrders,
-  })
   const { data: clients } = useQuery({
     queryKey: ['clients'],
     queryFn: listClients,
@@ -86,10 +90,6 @@ export default function OrdersPage() {
   const { data: products } = useQuery({
     queryKey: ['products'],
     queryFn: listProducts,
-  })
-  const { data: routes } = useQuery({
-    queryKey: ['routes'],
-    queryFn: listRoutes,
   })
 
   const [modalOpen, setModalOpen] = useState(false)
@@ -118,36 +118,50 @@ export default function OrdersPage() {
   const [nameSearch, setNameSearch] = useState('')
   const [page, setPage] = useState(1)
 
+  // Búsqueda con "debounce": se consulta 300 ms después de dejar de escribir,
+  // para no lanzar una petición por cada tecla.
+  const [searchQuery, setSearchQuery] = useState('')
+  useEffect(() => {
+    const id = setTimeout(() => setSearchQuery(nameSearch.trim()), 300)
+    return () => clearTimeout(id)
+  }, [nameSearch])
+
   const invalidate = () => qc.invalidateQueries({ queryKey: ['orders'] })
 
-  const filteredOrders = useMemo(() => {
-    return (orders ?? []).filter((o) => {
-      const d = toLocalDateStr(o.created_at)
-      if (dateFrom && d < dateFrom) return false
-      if (dateTo && d > dateTo) return false
-      if (filterClientId && o.client_id !== filterClientId) return false
-      if (
-        nameSearch &&
-        !orderClientName(o).toLowerCase().includes(nameSearch.trim().toLowerCase())
-      )
-        return false
-      if (paymentFilter !== 'all' && o.payment_method !== paymentFilter)
-        return false
-      if (paidFilter === 'paid' && !o.paid) return false
-      if (paidFilter === 'unpaid' && o.paid) return false
-      if (statusFilter !== 'all' && o.status !== statusFilter) return false
-      return true
-    })
-  }, [
-    orders,
-    dateFrom,
-    dateTo,
-    statusFilter,
-    paidFilter,
-    paymentFilter,
-    filterClientId,
-    nameSearch,
-  ])
+  // Pedidos filtrados y paginados EN EL SERVIDOR (ver listOrdersPage). La clave
+  // incluye todos los filtros (se refetchea al cambiarlos) y comparte el prefijo
+  // ['orders'] con reportes/entregas, así invalidate() cubre todo.
+  const { data: ordersPage, isLoading } = useQuery({
+    queryKey: [
+      'orders',
+      'page',
+      {
+        q: searchQuery,
+        client: filterClientId,
+        from: dateFrom,
+        to: dateTo,
+        status: statusFilter,
+        paid: paidFilter,
+        method: paymentFilter,
+        page,
+      },
+    ],
+    queryFn: () =>
+      listOrdersPage({
+        query: searchQuery || undefined,
+        clientId: filterClientId || undefined,
+        from: dateFrom || undefined,
+        to: dateTo || undefined,
+        status: statusFilter === 'all' ? undefined : statusFilter,
+        paid: paidFilter === 'all' ? undefined : paidFilter === 'paid',
+        method: paymentFilter === 'all' ? undefined : paymentFilter,
+        limit: PAGE_SIZE,
+        offset: (page - 1) * PAGE_SIZE,
+      }),
+    placeholderData: keepPreviousData,
+  })
+  const pageItems = ordersPage?.rows ?? []
+  const total = ordersPage?.total ?? 0
 
   const hasFilters = Boolean(
     dateFrom ||
@@ -169,12 +183,14 @@ export default function OrdersPage() {
     setPage(1)
   }
 
-  const pageCount = Math.max(1, Math.ceil(filteredOrders.length / PAGE_SIZE))
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const currentPage = Math.min(page, pageCount)
-  const pageItems = filteredOrders.slice(
-    (currentPage - 1) * PAGE_SIZE,
-    currentPage * PAGE_SIZE
-  )
+
+  // Si tras borrar/cambiar filtros la página queda vacía sin ser la primera,
+  // vuelve a la primera (evita quedar en una página que ya no existe).
+  useEffect(() => {
+    if (!isLoading && page > 1 && pageItems.length === 0) setPage(1)
+  }, [isLoading, page, pageItems.length])
 
   const selectedClient = useMemo(
     () => clients?.find((c) => c.id === clientId),
@@ -238,12 +254,21 @@ export default function OrdersPage() {
   // Pedido que se va a agregar a una ruta (abre el modal con las rutas).
   const [assignTarget, setAssignTarget] = useState<OrderDetail | null>(null)
 
+  // Rutas abiertas para el selector: se cargan SÓLO al abrir el modal (ahorro de
+  // egress; antes se traían todas las rutas + paradas en cada visita a Pedidos).
+  const { data: openRoutes } = useQuery({
+    queryKey: ['open-routes'],
+    queryFn: listOpenRoutes,
+    enabled: assignTarget != null,
+  })
+
   const addToRouteMutation = useMutation({
     mutationFn: ({ orderId, routeId }: { orderId: string; routeId: string }) =>
       addOrderToRoute(routeId, orderId),
     onSuccess: () => {
       invalidate()
       qc.invalidateQueries({ queryKey: ['routes'] })
+      qc.invalidateQueries({ queryKey: ['open-routes'] })
       setAssignTarget(null)
     },
   })
@@ -346,7 +371,7 @@ export default function OrdersPage() {
         </p>
       )}
 
-      {!isLoading && orders && orders.length > 0 && (
+      {(total > 0 || hasFilters) && (
         <>
           <Card className="mb-4 p-4">
             <div className="mb-4">
@@ -473,17 +498,16 @@ export default function OrdersPage() {
           </Card>
 
           <div className="mb-3 text-sm text-slate-500">
-            {filteredOrders.length}{' '}
-            {filteredOrders.length === 1 ? 'pedido' : 'pedidos'}
+            {total} {total === 1 ? 'pedido' : 'pedidos'}
           </div>
         </>
       )}
 
       {isLoading ? (
         <Spinner />
-      ) : !orders || orders.length === 0 ? (
+      ) : total === 0 && !hasFilters ? (
         <EmptyState>Aún no hay pedidos.</EmptyState>
-      ) : filteredOrders.length === 0 ? (
+      ) : total === 0 ? (
         <EmptyState>No hay pedidos con esos filtros.</EmptyState>
       ) : isMobile ? (
         <>
@@ -690,7 +714,7 @@ export default function OrdersPage() {
           </p>
         )}
         <AddToRouteList
-          routes={routes ?? []}
+          routes={openRoutes ?? []}
           onAdd={(routeId) =>
             assignTarget &&
             addToRouteMutation.mutate({ orderId: assignTarget.id, routeId })
@@ -1169,12 +1193,11 @@ function AddToRouteList({
   onAdd,
   isPending,
 }: {
-  routes: RouteSummary[]
+  routes: OpenRouteOption[]
   onAdd: (routeId: string) => void
   isPending: boolean
 }) {
-  const open = routes.filter((r) => !r.closed_at)
-  if (open.length === 0) {
+  if (routes.length === 0) {
     return (
       <p className="py-6 text-center text-sm text-slate-500">
         No hay rutas abiertas. Crea una ruta en el módulo Rutas y vuelve a
@@ -1184,7 +1207,7 @@ function AddToRouteList({
   }
   return (
     <div className="max-h-96 space-y-2 overflow-y-auto">
-      {open.map((r) => (
+      {routes.map((r) => (
         <div
           key={r.id}
           className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2"
@@ -1195,8 +1218,7 @@ function AddToRouteList({
             </p>
             <p className="truncate text-sm text-slate-500">
               📅 {formatDateShort(r.route_date)} · 🚚{' '}
-              {r.driverName || 'Sin repartidor'} · {r.stopCount}{' '}
-              {r.stopCount === 1 ? 'parada' : 'paradas'}
+              {r.driverName || 'Sin repartidor'}
             </p>
           </div>
           <Button

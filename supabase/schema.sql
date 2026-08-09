@@ -790,6 +790,55 @@ $$;
 grant execute on function public.delivery_summary(uuid, date, date) to authenticated;
 
 -- ----------------------------------------------------------------------------
+--  Búsqueda paginada de pedidos (lista de Pedidos). Filtra EN EL SERVIDOR por
+--  texto (nombre del cliente registrado o de la venta rápida), cliente, rango de
+--  fechas de creación (hora de Chile), estado, pago y método; devuelve sólo la
+--  página de ids (más recientes primero) y el total de coincidencias
+--  (count(*) over(), calculado antes del LIMIT). La UI luego trae únicamente esos
+--  pedidos con sus columnas mínimas → mucho menos egress que descargar todo.
+--  SECURITY INVOKER: se apoya en RLS (sólo ve los pedidos de su empresa).
+-- ----------------------------------------------------------------------------
+create or replace function public.search_order_ids(
+  p_query   text    default null,
+  p_client  uuid    default null,
+  p_from    date    default null,
+  p_to      date    default null,
+  p_status  text    default null,
+  p_paid    boolean default null,
+  p_method  text    default null,
+  p_limit   int     default 10,
+  p_offset  int     default 0
+)
+returns table (id uuid, total bigint)
+language sql stable security invoker set search_path = public as $$
+  select o.id, count(*) over() as total
+  from orders o
+  left join clients c on c.id = o.client_id
+  where o.company_id = current_company_id()
+    and (p_client is null or o.client_id = p_client)
+    and (p_status is null or o.status = p_status::order_status)
+    and (p_paid   is null or o.paid = p_paid)
+    and (p_method is null or o.payment_method = p_method::payment_method)
+    and (p_from is null
+         or (o.created_at at time zone 'America/Santiago')::date >= p_from)
+    and (p_to is null
+         or (o.created_at at time zone 'America/Santiago')::date <= p_to)
+    and (
+      p_query is null
+      or coalesce(
+           nullif(btrim(coalesce(c.name, '') || ' ' || coalesce(c.surname, '')), ''),
+           o.customer_name,
+           ''
+         ) ilike '%' || p_query || '%'
+    )
+  order by o.created_at desc
+  limit greatest(p_limit, 0)
+  offset greatest(p_offset, 0)
+$$;
+
+grant execute on function public.search_order_ids(text, uuid, date, date, text, boolean, text, int, int) to authenticated;
+
+-- ----------------------------------------------------------------------------
 --  Agregar company_id a todas las tablas de datos. El default lo llena solo
 --  con la empresa del usuario que inserta, así el frontend no tiene que enviarlo.
 -- ----------------------------------------------------------------------------

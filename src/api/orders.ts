@@ -1,5 +1,10 @@
 import { supabase } from '../lib/supabase'
-import type { OrderDetail, OrderPayment, PaymentMethod } from '../types/db'
+import type {
+  OrderDetail,
+  OrderPayment,
+  OrderStatus,
+  PaymentMethod,
+} from '../types/db'
 
 // Redondea a 2 decimales (evita errores de punto flotante al sumar montos).
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
@@ -23,35 +28,103 @@ export interface OrderInput {
   payment_method?: PaymentMethod | null
 }
 
+// Sólo las columnas que consume la UI (ahorro de egress): de los embeds no se
+// traen imágenes/descripciones de producto ni datos del cliente que no se
+// muestran. Incluye la ruta (para la fecha de entrega y el repartidor).
+const ORDER_LIST_SELECT =
+  '*, client:clients(id, name, surname, phone), address:addresses(id, address, comuna, observation), items:order_items(id, product_id, quantity, unit_price, product:products(id, name)), stops:route_stops(route:routes(driver_id, route_date, driver_profile:profiles!driver_id(full_name, email)))'
+
+type Stop = {
+  route: {
+    driver_id: string | null
+    route_date: string | null
+    driver_profile: { full_name: string | null; email: string | null } | null
+  } | null
+}
+// PostgREST devuelve el embed como OBJETO (relación 1-a-1 por el unique de
+// route_stops.order_id) o como arreglo según el caso: soportamos ambos.
+type OrderRow = OrderDetail & { stops?: Stop | Stop[] | null }
+
+/** Aplana el embed de ruta a driverId/driverName/routeDate en el pedido. */
+function mapOrderRow({ stops, ...o }: OrderRow): OrderDetail {
+  const stop = Array.isArray(stops) ? stops[0] : stops
+  const route = stop?.route
+  const dp = route?.driver_profile
+  return {
+    ...o,
+    driverId: route?.driver_id ?? null,
+    driverName: dp?.full_name || dp?.email || null,
+    routeDate: route?.route_date ?? null,
+  }
+}
+
+/** TODOS los pedidos (para reportes/entregas, que agregan sobre el período). */
 export async function listOrders(): Promise<OrderDetail[]> {
   const { data, error } = await supabase
     .from('orders')
-    .select(
-      '*, client:clients(*), address:addresses(*), items:order_items(*, product:products(*)), stops:route_stops(route:routes(driver_id, route_date, driver_profile:profiles!driver_id(full_name, email)))'
-    )
+    .select(ORDER_LIST_SELECT)
     .order('created_at', { ascending: false })
   if (error) throw error
-  type Stop = {
-    route: {
-      driver_id: string | null
-      route_date: string | null
-      driver_profile: { full_name: string | null; email: string | null } | null
-    } | null
-  }
-  // PostgREST devuelve el embed como OBJETO (relación 1-a-1 por el unique de
-  // route_stops.order_id) o como arreglo según el caso: soportamos ambos.
-  type Row = OrderDetail & { stops?: Stop | Stop[] | null }
-  return ((data ?? []) as Row[]).map(({ stops, ...o }) => {
-    const stop = Array.isArray(stops) ? stops[0] : stops
-    const route = stop?.route
-    const dp = route?.driver_profile
-    return {
-      ...o,
-      driverId: route?.driver_id ?? null,
-      driverName: dp?.full_name || dp?.email || null,
-      routeDate: route?.route_date ?? null,
-    }
+  return ((data ?? []) as OrderRow[]).map(mapOrderRow)
+}
+
+export interface OrdersPageFilters {
+  query?: string
+  clientId?: string
+  from?: string
+  to?: string
+  status?: OrderStatus
+  paid?: boolean
+  method?: PaymentMethod
+  limit: number
+  offset: number
+}
+
+export interface OrdersPageResult {
+  rows: OrderDetail[]
+  total: number
+}
+
+/**
+ * Página de pedidos filtrada y paginada EN EL SERVIDOR (lista de Pedidos). El
+ * filtrado —incluida la búsqueda por nombre, que cruza clientes + venta rápida—
+ * lo hace la función SQL search_order_ids; aquí sólo se traen los pedidos de esa
+ * página con sus columnas mínimas, preservando el orden devuelto por la BD.
+ */
+export async function listOrdersPage(
+  opts: OrdersPageFilters
+): Promise<OrdersPageResult> {
+  const { data: idRows, error } = await supabase.rpc('search_order_ids', {
+    p_query: opts.query?.trim() || null,
+    p_client: opts.clientId ?? null,
+    p_from: opts.from ?? null,
+    p_to: opts.to ?? null,
+    p_status: opts.status ?? null,
+    p_paid: opts.paid ?? null,
+    p_method: opts.method ?? null,
+    p_limit: opts.limit,
+    p_offset: opts.offset,
   })
+  if (error) throw error
+  const rows = (idRows ?? []) as { id: string; total: number }[]
+  const ids = rows.map((r) => r.id)
+  const total = rows.length > 0 ? Number(rows[0].total) : 0
+  if (ids.length === 0) return { rows: [], total: 0 }
+
+  const { data, error: e2 } = await supabase
+    .from('orders')
+    .select(ORDER_LIST_SELECT)
+    .in('id', ids)
+  if (e2) throw e2
+
+  // `in` no conserva el orden: se reordena según los ids que devolvió la BD.
+  const byId = new Map(
+    ((data ?? []) as OrderRow[]).map((o) => [o.id, mapOrderRow(o)])
+  )
+  return {
+    rows: ids.map((id) => byId.get(id)).filter(Boolean) as OrderDetail[],
+    total,
+  }
 }
 
 export async function getOrder(id: string): Promise<OrderDetail> {
