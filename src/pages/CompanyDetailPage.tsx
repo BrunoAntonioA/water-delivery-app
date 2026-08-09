@@ -5,6 +5,8 @@ import { getCompanySubscription } from '../api/billing'
 import { COMPANY_MODULES, MODULE_LABELS, type ModuleKey } from '../types/auth'
 import { CompanyUsers } from '../components/CompanyUsers'
 import { CompanySubscription } from '../components/CompanySubscription'
+import { CompanyBackup } from '../components/CompanyBackup'
+import { CompanyClientsExport } from '../components/CompanyClientsExport'
 import { Card, EmptyState, PageHeader, Spinner } from '../components/ui'
 
 export default function CompanyDetailPage() {
@@ -147,6 +149,10 @@ export default function CompanyDetailPage() {
           )}
         </Card>
       )}
+
+      <CompanyBackup companyId={company.id} companyName={company.name} />
+
+      <CompanyClientsExport companyId={company.id} companyName={company.name} />
 
       <h2 className="mb-3 font-semibold text-slate-900">Usuarios</h2>
       <CompanyUsers companyId={company.id} />

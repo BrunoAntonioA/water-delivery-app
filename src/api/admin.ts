@@ -64,6 +64,39 @@ export async function deleteCompany(id: string): Promise<void> {
   if (error) throw error
 }
 
+export interface CompanyExportBundle {
+  company: Record<string, unknown>
+  exported_at: string
+  tables: Record<string, Record<string, unknown>[]>
+}
+
+/**
+ * Descarga TODOS los datos de una empresa (respaldo). Lo hace la Edge Function
+ * "export-company" con el service role; sólo el superadmin puede invocarla.
+ */
+export async function exportCompanyData(
+  companyId: string,
+  tables?: string[]
+): Promise<CompanyExportBundle> {
+  const { data, error } = await supabase.functions.invoke('export-company', {
+    body: { companyId, tables },
+  })
+  if (error) {
+    let message = error.message
+    const context = (error as { context?: Response }).context
+    if (context && typeof context.json === 'function') {
+      try {
+        const body = await context.json()
+        if (body?.error) message = body.error
+      } catch {
+        /* sin cuerpo JSON */
+      }
+    }
+    throw new Error(message)
+  }
+  return data as CompanyExportBundle
+}
+
 // --- Usuarios ---
 
 export async function listUsers(): Promise<Profile[]> {
