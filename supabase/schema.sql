@@ -1144,9 +1144,9 @@ create policy "tenant_route_stops" on route_stops for all
 
 -- Carga de la ruta.
 --  - Lectura: el repartidor ve la carga de sus rutas asignadas.
---  - Escritura: admin/operador siempre; el repartidor SÓLO mientras la carga
---    aún no está confirmada (registro inicial). Una vez confirmada, sólo un
---    administrador puede modificarla.
+--  - Escritura: admin/operador siempre; el repartidor puede registrar y AGREGAR
+--    carga en las rutas asignadas a él (aunque ya esté confirmada, para poder
+--    sumar carga durante el día). Nunca en rutas que no son suyas.
 drop policy if exists "route_loads_select" on route_loads;
 drop policy if exists "route_loads_write" on route_loads;
 create policy "route_loads_select" on route_loads for select
@@ -1157,29 +1157,11 @@ create policy "route_loads_select" on route_loads for select
 create policy "route_loads_write" on route_loads for all
   using (
     company_id = current_company_id()
-    and (
-      current_user_role() <> 'repartidor'
-      or (
-        is_my_route(route_id)
-        and not coalesce(
-          (select r.load_confirmed from routes r where r.id = route_loads.route_id),
-          false
-        )
-      )
-    )
+    and (current_user_role() <> 'repartidor' or is_my_route(route_id))
   )
   with check (
     company_id = current_company_id()
-    and (
-      current_user_role() <> 'repartidor'
-      or (
-        is_my_route(route_id)
-        and not coalesce(
-          (select r.load_confirmed from routes r where r.id = route_loads.route_id),
-          false
-        )
-      )
-    )
+    and (current_user_role() <> 'repartidor' or is_my_route(route_id))
   );
 
 -- Pedidos: el repartidor sólo ve los pedidos que están en sus rutas.
