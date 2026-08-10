@@ -23,6 +23,34 @@ export async function listPlans(): Promise<Plan[]> {
   return (data ?? []) as Plan[]
 }
 
+/** Todos los planes (incluye inactivos), para el editor del superadmin. */
+export async function listAllPlans(): Promise<Plan[]> {
+  const { data, error } = await supabase
+    .from('plans')
+    .select('*')
+    .order('sort', { ascending: true })
+  if (error) throw error
+  return (data ?? []) as Plan[]
+}
+
+export interface PlanPatch {
+  name?: string
+  description?: string | null
+  price?: number
+  modules?: string[]
+  max_users?: number | null
+  max_clients?: number | null
+  trial_days?: number
+  is_public?: boolean
+  active?: boolean
+}
+
+/** Edita un plan (sólo superadmin, por RLS). Se refleja en todo el sistema. */
+export async function updatePlan(id: string, patch: PlanPatch): Promise<void> {
+  const { error } = await supabase.from('plans').update(patch).eq('id', id)
+  if (error) throw error
+}
+
 /**
  * Suscripción de una empresa (con su plan). Devuelve null si no tiene (empresa
  * "legado" con acceso libre) o si la tabla aún no existe.

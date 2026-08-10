@@ -23,6 +23,7 @@ import CompanyDetailPage from './pages/CompanyDetailPage'
 import TemplatesPage from './pages/TemplatesPage'
 import UsersPage from './pages/UsersPage'
 import CompaniesPage from './pages/CompaniesPage'
+import PlansPage from './pages/PlansPage'
 import SubscriptionPage from './pages/SubscriptionPage'
 import SignupPage from './pages/SignupPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
@@ -50,6 +51,7 @@ const NAV: {
   { module: 'usuarios', to: '/usuarios', label: 'Usuarios', icon: '🔑' },
   { module: 'suscripcion', to: '/suscripcion', label: 'Suscripción', icon: '💳' },
   { module: 'empresas', to: '/empresas', label: 'Empresas', icon: '🏢' },
+  { module: 'planes', to: '/planes', label: 'Planes', icon: '🏷️' },
 ]
 
 // Ruta protegida: si el rol no puede ver el módulo, redirige a su primer módulo.
@@ -410,6 +412,14 @@ export default function App() {
             element={
               <Protected module="empresas" home={home}>
                 <CompanyDetailPage />
+              </Protected>
+            }
+          />
+          <Route
+            path="/planes"
+            element={
+              <Protected module="planes" home={home}>
+                <PlansPage />
               </Protected>
             }
           />

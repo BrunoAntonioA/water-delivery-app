@@ -415,15 +415,10 @@ values
    'Sin límites, para operaciones grandes con varios camiones.',
    50000, array['rutas','pedidos','clientes','productos','costos','entregas','reportes','plantillas','usuarios','abastecimiento'],
    null, null, 10, 3)
-on conflict (key) do update set
-  name        = excluded.name,
-  description = excluded.description,
-  price       = excluded.price,
-  modules     = excluded.modules,
-  max_users   = excluded.max_users,
-  max_clients = excluded.max_clients,
-  trial_days  = excluded.trial_days,
-  sort        = excluded.sort;
+-- Sólo inserta los planes si faltan. NO sobrescribe (do nothing) para no pisar
+-- las ediciones que el superadmin haga desde el módulo "Planes" al re-ejecutar
+-- este archivo.
+on conflict (key) do nothing;
 
 create table if not exists subscriptions (
   id                       uuid primary key default gen_random_uuid(),
