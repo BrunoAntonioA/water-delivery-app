@@ -130,3 +130,45 @@ export async function deleteClient(id: string): Promise<void> {
   const { error } = await supabase.from('clients').delete().eq('id', id)
   if (error) throw error
 }
+
+/**
+ * Derecho de supresión (Ley 21.719). Si el cliente NO tiene pedidos, se elimina
+ * por completo (las direcciones caen en cascada). Si tiene historial de pedidos,
+ * NO se puede borrar (FK on delete restrict) ni conviene —el historial es
+ * registro contable—, así que se ANONIMIZA: se borran sus direcciones y se
+ * limpian sus datos personales, conservando los pedidos ya de-identificados.
+ * Devuelve qué ocurrió para informar en la UI.
+ */
+export async function eraseClientData(
+  id: string
+): Promise<'deleted' | 'anonymized'> {
+  const { count, error: countErr } = await supabase
+    .from('orders')
+    .select('id', { count: 'exact', head: true })
+    .eq('client_id', id)
+  if (countErr) throw countErr
+
+  if ((count ?? 0) > 0) {
+    const { error: addrErr } = await supabase
+      .from('addresses')
+      .delete()
+      .eq('client_id', id)
+    if (addrErr) throw addrErr
+    const { error } = await supabase
+      .from('clients')
+      .update({
+        name: 'Cliente eliminado',
+        surname: '',
+        national_id: null,
+        phone: '',
+        anonymized_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+    if (error) throw error
+    return 'anonymized'
+  }
+
+  const { error } = await supabase.from('clients').delete().eq('id', id)
+  if (error) throw error
+  return 'deleted'
+}

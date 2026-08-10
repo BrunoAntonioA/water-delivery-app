@@ -30,6 +30,7 @@ import LoginPage from './pages/LoginPage'
 import { VerifyEmailWall } from './components/VerifyEmailWall'
 import { FlowReturnScreen } from './components/FlowReturnScreen'
 import { Logo } from './components/Logo'
+import TermsPage from './pages/TermsPage'
 
 const NAV: {
   module: ModuleKey
@@ -43,7 +44,7 @@ const NAV: {
   { module: 'clientes', to: '/clientes', label: 'Clientes', icon: '👥' },
   { module: 'productos', to: '/productos', label: 'Productos', icon: '💧' },
   { module: 'costos', to: '/costos', label: 'Costos', icon: '💸' },
-  { module: 'abastecimiento', to: '/abastecimiento', label: 'Abastecimiento', icon: '🚰' },
+  { module: 'abastecimiento', to: '/abastecimiento', label: 'Suministros', icon: '🚰' },
   { module: 'reportes', to: '/reportes', label: 'Reportes', icon: '📊' },
   { module: 'plantillas', to: '/plantillas', label: 'Plantillas', icon: '💬' },
   { module: 'usuarios', to: '/usuarios', label: 'Usuarios', icon: '🔑' },
@@ -123,6 +124,9 @@ export default function App() {
   // Nueva contraseña: se llega por el enlace de recuperación (crea una sesión
   // temporal), así que debe mostrarse siempre, sin importar el estado de auth.
   if (location.pathname === '/nueva-clave') return <ResetPasswordPage />
+
+  // Términos y Condiciones: documento público, accesible con o sin sesión.
+  if (location.pathname === '/terminos') return <TermsPage />
 
   if (loading) return <LoadingScreen />
 
@@ -276,8 +280,14 @@ export default function App() {
 
       <div className="flex w-full">
         {/* Menú lateral en escritorio */}
-        <aside className="hidden w-56 shrink-0 border-r border-slate-200 p-3 lg:block">
+        <aside className="hidden w-56 shrink-0 flex-col border-r border-slate-200 p-3 lg:flex">
           <SidebarNav items={navItems} />
+          <NavLink
+            to="/terminos"
+            className="mt-auto px-3 pt-4 text-xs text-slate-400 hover:text-slate-600 hover:underline"
+          >
+            Términos y condiciones
+          </NavLink>
         </aside>
 
         <main className="min-w-0 flex-1 px-4 py-8 sm:px-6 lg:px-8">
@@ -437,6 +447,13 @@ export default function App() {
               onNavigate={() => setMenuOpen(false)}
               size="lg"
             />
+            <NavLink
+              to="/terminos"
+              onClick={() => setMenuOpen(false)}
+              className="mt-auto px-4 pt-4 text-sm text-slate-400 hover:text-slate-600 hover:underline"
+            >
+              Términos y condiciones
+            </NavLink>
           </aside>
         </div>
       )}

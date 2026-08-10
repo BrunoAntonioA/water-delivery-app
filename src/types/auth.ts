@@ -95,7 +95,7 @@ export const MODULE_LABELS: Record<ModuleKey, string> = {
   clientes: 'Clientes',
   productos: 'Productos',
   costos: 'Costos',
-  abastecimiento: 'Abastecimiento',
+  abastecimiento: 'Suministros',
   plantillas: 'Plantillas',
   usuarios: 'Usuarios',
   suscripcion: 'Suscripción',

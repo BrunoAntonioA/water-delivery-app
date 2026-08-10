@@ -257,14 +257,14 @@ export default function AbastecimientoPage() {
   return (
     <div>
       <PageHeader
-        title="Abastecimiento"
+        title="Suministros"
         subtitle="Registra las compras de insumos: proveedor, cantidad y precio de cada uno."
         action={
           <div className="flex gap-2">
             <Button variant="secondary" onClick={() => setProvModalOpen(true)}>
               Proveedores
             </Button>
-            <Button onClick={openNew}>+ Nuevo abastecimiento</Button>
+            <Button onClick={openNew}>+ Nuevo suministro</Button>
           </div>
         }
       />
@@ -315,7 +315,7 @@ export default function AbastecimientoPage() {
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm">
         <span className="text-slate-500">
           {filtered.length}{' '}
-          {filtered.length === 1 ? 'abastecimiento' : 'abastecimientos'}
+          {filtered.length === 1 ? 'suministro' : 'suministros'}
         </span>
         <span className="font-semibold text-slate-900">
           Total: {formatMoney(totalSum)}
@@ -326,11 +326,11 @@ export default function AbastecimientoPage() {
         <Spinner />
       ) : !purchases || purchases.length === 0 ? (
         <EmptyState>
-          Aún no registras abastecimientos. Agrega el primero con “Nuevo
-          abastecimiento”.
+          Aún no registras suministros. Agrega el primero con “Nuevo
+          suministro”.
         </EmptyState>
       ) : filtered.length === 0 ? (
-        <EmptyState>No hay abastecimientos con esos filtros.</EmptyState>
+        <EmptyState>No hay suministros con esos filtros.</EmptyState>
       ) : (
         <>
           <Card className="overflow-hidden">
@@ -386,7 +386,7 @@ export default function AbastecimientoPage() {
                             onClick={() => {
                               if (
                                 confirm(
-                                  `¿Eliminar el abastecimiento del ${shortDate(p.purchase_date)}${
+                                  `¿Eliminar el suministro del ${shortDate(p.purchase_date)}${
                                     p.provider ? ` (${p.provider.name})` : ''
                                   }?`
                                 )
@@ -412,7 +412,7 @@ export default function AbastecimientoPage() {
       <Modal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
-        title={editing ? 'Editar abastecimiento' : 'Nuevo abastecimiento'}
+        title={editing ? 'Editar suministro' : 'Nuevo suministro'}
         wide
       >
         <form
@@ -632,7 +632,7 @@ export default function AbastecimientoPage() {
       {/* Aviso si no hay insumos aún. */}
       {supplies && supplies.length === 0 && (
         <p className="mt-4 text-xs text-slate-400">
-          Aún no tienes insumos. Puedes crearlos al registrar un abastecimiento o
+          Aún no tienes insumos. Puedes crearlos al registrar un suministro o
           desde el módulo Productos.
         </p>
       )}
@@ -757,7 +757,7 @@ function ProvidersModal({
                     if (
                       confirm(
                         n > 0
-                          ? `"${p.name}" está en ${n} abastecimiento(s). Si lo eliminas, esos quedarán "Sin proveedor". ¿Continuar?`
+                          ? `"${p.name}" está en ${n} suministro(s). Si lo eliminas, esos quedarán "Sin proveedor". ¿Continuar?`
                           : `¿Eliminar el proveedor "${p.name}"?`
                       )
                     )

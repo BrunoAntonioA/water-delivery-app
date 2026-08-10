@@ -271,6 +271,19 @@ export default function SignupPage() {
 
           {error && <p className="text-sm text-red-600">{error}</p>}
 
+          <p className="text-center text-xs text-slate-500">
+            Al crear tu cuenta aceptas los{' '}
+            <a
+              href="/terminos"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-sky-600 hover:underline"
+            >
+              Términos y Condiciones y la Política de Privacidad
+            </a>
+            , incluida la transferencia internacional de datos.
+          </p>
+
           <Button type="submit" className="w-full" disabled={!canSubmit}>
             {loading ? 'Creando tu cuenta…' : `Empezar prueba de ${TRIAL_DAYS} días`}
           </Button>

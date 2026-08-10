@@ -20,7 +20,7 @@ const GROUPS: { key: string; label: string; tables: string[] }[] = [
   { key: 'pedidos', label: 'Pedidos', tables: ['orders', 'order_items'] },
   { key: 'rutas', label: 'Rutas', tables: ['routes', 'route_stops', 'route_loads', 'route_pickups'] },
   { key: 'costos', label: 'Costos', tables: ['cost_categories', 'costs'] },
-  { key: 'abastecimiento', label: 'Abastecimiento', tables: ['providers', 'supply_purchases', 'supply_purchase_items'] },
+  { key: 'abastecimiento', label: 'Suministros', tables: ['providers', 'supply_purchases', 'supply_purchase_items'] },
   { key: 'plantillas', label: 'Plantillas de WhatsApp', tables: ['whatsapp_templates'] },
   { key: 'suscripcion', label: 'Suscripción y pagos', tables: ['subscriptions', 'subscription_payments', 'payment_intents'] },
   { key: 'usuarios', label: 'Usuarios', tables: ['profiles'] },

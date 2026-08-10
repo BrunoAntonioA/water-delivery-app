@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import {
   createClient,
-  deleteClient,
+  eraseClientData,
   listClients,
   updateClient,
   type AddressInput,
@@ -62,6 +62,11 @@ export default function ClientsPage() {
   const [contactClient, setContactClient] = useState<ClientWithAddresses | null>(
     null
   )
+  // Cliente pendiente de eliminación (confirmación en modal) y aviso posterior.
+  const [eraseTarget, setEraseTarget] = useState<ClientWithAddresses | null>(
+    null
+  )
+  const [notice, setNotice] = useState<string | null>(null)
 
   const filtered = useMemo(() => {
     const qStr = search.trim().toLowerCase()
@@ -100,9 +105,17 @@ export default function ClientsPage() {
     },
   })
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => deleteClient(id),
-    onSuccess: invalidate,
+  const eraseMutation = useMutation({
+    mutationFn: (id: string) => eraseClientData(id),
+    onSuccess: (result) => {
+      invalidate()
+      setNotice(
+        result === 'deleted'
+          ? 'Cliente eliminado.'
+          : 'Se eliminaron los datos personales del cliente. Se conservó su historial de pedidos, ya anonimizado.'
+      )
+      setEraseTarget(null)
+    },
   })
 
   function openNew() {
@@ -171,6 +184,20 @@ export default function ClientsPage() {
         action={<Button onClick={openNew}>+ Nuevo cliente</Button>}
       />
 
+      {notice && (
+        <div className="mb-3 flex items-start justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-800">
+          <span>✓ {notice}</span>
+          <button
+            type="button"
+            onClick={() => setNotice(null)}
+            aria-label="Cerrar aviso"
+            className="shrink-0 text-emerald-600 hover:text-emerald-800"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {!isLoading && clients && clients.length > 0 && (
         <div className="mb-4 flex flex-wrap items-center gap-2">
           <TextInput
@@ -211,15 +238,24 @@ export default function ClientsPage() {
       ) : (
         <>
           <div className="grid gap-3">
-          {pageItems.map((c) => (
-            <Card key={c.id} className="p-4">
+          {pageItems.map((c) => {
+            const erased = Boolean(c.anonymized_at)
+            return (
+            <Card key={c.id} className={`p-4 ${erased ? 'opacity-60' : ''}`}>
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <p className="font-semibold text-slate-900">
-                    {c.name} {c.surname}
+                  <p className="flex flex-wrap items-center gap-2 font-semibold text-slate-900">
+                    <span>
+                      {c.name} {c.surname}
+                    </span>
+                    {erased && (
+                      <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-600">
+                        Datos eliminados
+                      </span>
+                    )}
                   </p>
                   <p className="text-sm text-slate-500">
-                    📞 {c.phone}
+                    📞 {c.phone || '—'}
                     {c.national_id ? ` · 🪪 ${c.national_id}` : ''}
                   </p>
                   {c.addresses.length > 0 && (
@@ -239,31 +275,26 @@ export default function ClientsPage() {
                     </ul>
                   )}
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    variant="success"
-                    onClick={() => setContactClient(c)}
-                  >
-                    Contactar
-                  </Button>
-                  <Button variant="secondary" onClick={() => openEdit(c)}>
-                    Editar
-                  </Button>
-                  <Button
-                    variant="danger"
-                    onClick={() => {
-                      if (
-                        confirm(`¿Eliminar a ${c.name} ${c.surname}?`)
-                      )
-                        deleteMutation.mutate(c.id)
-                    }}
-                  >
-                    Eliminar
-                  </Button>
-                </div>
+                {!erased && (
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="success"
+                      onClick={() => setContactClient(c)}
+                    >
+                      Contactar
+                    </Button>
+                    <Button variant="secondary" onClick={() => openEdit(c)}>
+                      Editar
+                    </Button>
+                    <Button variant="danger" onClick={() => setEraseTarget(c)}>
+                      Eliminar datos
+                    </Button>
+                  </div>
+                )}
               </div>
             </Card>
-          ))}
+            )
+          })}
           </div>
           <Pagination
             page={currentPage}
@@ -418,6 +449,50 @@ export default function ClientsPage() {
             </Button>
           </div>
         </form>
+      </Modal>
+
+      {/* Eliminar datos del cliente (derecho de supresión) */}
+      <Modal
+        open={eraseTarget != null}
+        onClose={() => setEraseTarget(null)}
+        title="Eliminar datos del cliente"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">
+            Vas a eliminar los datos personales de{' '}
+            <span className="font-semibold">
+              {eraseTarget ? `${eraseTarget.name} ${eraseTarget.surname}` : ''}
+            </span>{' '}
+            (nombre, teléfono, identificación y direcciones).
+          </p>
+          <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+            Si el cliente tiene pedidos, el historial se conserva pero queda
+            anonimizado (no se puede borrar por razones contables). Si no tiene
+            pedidos, se elimina por completo. Esta acción no se puede deshacer.
+          </p>
+          {eraseMutation.isError && (
+            <p className="text-sm text-red-600">
+              Error: {(eraseMutation.error as Error).message}
+            </p>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setEraseTarget(null)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
+              disabled={eraseMutation.isPending}
+              onClick={() => eraseTarget && eraseMutation.mutate(eraseTarget.id)}
+            >
+              {eraseMutation.isPending ? 'Eliminando…' : 'Eliminar datos'}
+            </Button>
+          </div>
+        </div>
       </Modal>
 
       <TemplatePicker

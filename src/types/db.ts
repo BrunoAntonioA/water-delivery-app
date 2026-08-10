@@ -15,6 +15,8 @@ export interface Client {
   surname: string
   national_id: string | null
   phone: string
+  // Fecha de anonimización (derecho de supresión). null = cliente activo.
+  anonymized_at: string | null
   created_at: string
 }
 

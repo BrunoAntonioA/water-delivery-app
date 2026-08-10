@@ -43,6 +43,10 @@ create table if not exists clients (
   phone       text not null,              -- en formato internacional, ej: +50688887777
   created_at  timestamptz not null default now()
 );
+-- Derecho de supresión (Ley 21.719): si un cliente con historial de pedidos se
+-- "elimina", se anonimizan sus datos personales y se marca aquí la fecha, en vez
+-- de borrar la fila (que rompería el historial por la FK on delete restrict).
+alter table clients add column if not exists anonymized_at timestamptz;
 
 -- ----------------------------------------------------------------------------
 --  Direcciones (un cliente puede tener varias)
