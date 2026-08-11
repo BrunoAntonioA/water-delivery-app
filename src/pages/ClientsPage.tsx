@@ -8,7 +8,8 @@ import {
   type AddressInput,
   type ClientInput,
 } from '../api/clients'
-import type { ClientWithAddresses } from '../types/db'
+import type { ClientWithAddresses, PaymentPeriod } from '../types/db'
+import { PAYMENT_PERIOD_LABELS } from '../types/db'
 import { useAuth } from '../lib/auth'
 import {
   buildContactMessage,
@@ -42,6 +43,7 @@ const emptyForm: ClientInput = {
   surname: '',
   national_id: '',
   phone: '',
+  payment_period: null,
   addresses: [{ ...emptyAddress }],
 }
 
@@ -131,6 +133,7 @@ export default function ClientsPage() {
       surname: c.surname,
       national_id: c.national_id ?? '',
       phone: c.phone,
+      payment_period: c.payment_period,
       addresses:
         c.addresses.length > 0
           ? c.addresses.map((a) => ({
@@ -253,6 +256,11 @@ export default function ClientsPage() {
                         Datos eliminados
                       </span>
                     )}
+                    {c.payment_period && (
+                      <span className="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-700">
+                        🗓️ {PAYMENT_PERIOD_LABELS[c.payment_period]}
+                      </span>
+                    )}
                   </p>
                   <p className="text-sm text-slate-500">
                     📞 {c.phone || '—'}
@@ -359,6 +367,31 @@ export default function ClientsPage() {
                 required
               />
             </div>
+          </div>
+
+          <div>
+            <Label>Período de cobro (opcional)</Label>
+            <select
+              value={form.payment_period ?? ''}
+              onChange={(e) =>
+                setForm({
+                  ...form,
+                  payment_period: (e.target.value || null) as
+                    | PaymentPeriod
+                    | null,
+                })
+              }
+              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+            >
+              <option value="">Sin período (cobro al momento)</option>
+              {(
+                Object.keys(PAYMENT_PERIOD_LABELS) as PaymentPeriod[]
+              ).map((p) => (
+                <option key={p} value={p}>
+                  {PAYMENT_PERIOD_LABELS[p]}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div>

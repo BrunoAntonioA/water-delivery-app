@@ -76,6 +76,8 @@ export interface OrdersPageFilters {
   status?: OrderStatus
   paid?: boolean
   method?: PaymentMethod
+  // Período de cobro del cliente: '__none__' = sin período; o el valor concreto.
+  period?: string
   limit: number
   offset: number
 }
@@ -102,6 +104,7 @@ export async function listOrdersPage(
     p_status: opts.status ?? null,
     p_paid: opts.paid ?? null,
     p_method: opts.method ?? null,
+    p_period: opts.period ?? null,
     p_limit: opts.limit,
     p_offset: opts.offset,
   })

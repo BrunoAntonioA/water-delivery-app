@@ -1,5 +1,5 @@
 import { supabase } from '../lib/supabase'
-import type { ClientWithAddresses } from '../types/db'
+import type { ClientWithAddresses, PaymentPeriod } from '../types/db'
 
 export interface AddressInput {
   id?: string // presente si es una dirección existente
@@ -14,6 +14,7 @@ export interface ClientInput {
   surname: string
   national_id: string
   phone: string
+  payment_period: PaymentPeriod | null
   addresses: AddressInput[]
 }
 
@@ -51,6 +52,7 @@ export async function createClient(input: ClientInput): Promise<CreatedClient> {
       surname: input.surname,
       national_id: input.national_id || null,
       phone: input.phone,
+      payment_period: input.payment_period,
     })
     .select()
     .single()
@@ -97,32 +99,61 @@ export async function updateClient(
       surname: input.surname,
       national_id: input.national_id || null,
       phone: input.phone,
+      payment_period: input.payment_period,
     })
     .eq('id', id)
   if (error) throw error
 
-  // Estrategia simple: borrar las direcciones existentes y volver a insertarlas.
-  const { error: delError } = await supabase
-    .from('addresses')
-    .delete()
-    .eq('client_id', id)
-  if (delError) throw delError
+  // Direcciones: se CONSERVAN los ids de las existentes para no romper el enlace
+  // con los pedidos (address_id). Se actualizan las que ya existían, se agregan
+  // las nuevas y se borran sólo las que el usuario quitó del formulario.
+  const rows = input.addresses.filter((a) => a.address.trim())
+  const existentes = rows.filter((a) => a.id)
+  const nuevas = rows.filter((a) => !a.id)
 
-  const addresses = input.addresses
-    .filter((a) => a.address.trim())
-    .map((a) => ({
-      client_id: id,
-      label: a.label || null,
-      address: a.address.trim(),
-      comuna: a.comuna.trim() || null,
-      observation: a.observation.trim() || null,
-    }))
-
-  if (addresses.length > 0) {
-    const { error: addrError } = await supabase
+  // Actualizar las existentes (mismo id).
+  for (const a of existentes) {
+    const { error: uErr } = await supabase
       .from('addresses')
-      .insert(addresses)
-    if (addrError) throw addrError
+      .update({
+        label: a.label || null,
+        address: a.address.trim(),
+        comuna: a.comuna.trim() || null,
+        observation: a.observation.trim() || null,
+      })
+      .eq('id', a.id!)
+    if (uErr) throw uErr
+  }
+
+  // Borrar sólo las direcciones que ya no están en el formulario.
+  const { data: current } = await supabase
+    .from('addresses')
+    .select('id')
+    .eq('client_id', id)
+  const keep = new Set(existentes.map((a) => a.id))
+  const toDelete = (current ?? [])
+    .map((r) => r.id as string)
+    .filter((cid) => !keep.has(cid))
+  if (toDelete.length > 0) {
+    const { error: dErr } = await supabase
+      .from('addresses')
+      .delete()
+      .in('id', toDelete)
+    if (dErr) throw dErr
+  }
+
+  // Insertar las direcciones nuevas.
+  if (nuevas.length > 0) {
+    const { error: iErr } = await supabase.from('addresses').insert(
+      nuevas.map((a) => ({
+        client_id: id,
+        label: a.label || null,
+        address: a.address.trim(),
+        comuna: a.comuna.trim() || null,
+        observation: a.observation.trim() || null,
+      }))
+    )
+    if (iErr) throw iErr
   }
 }
 

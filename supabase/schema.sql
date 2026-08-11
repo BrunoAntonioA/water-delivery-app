@@ -47,6 +47,10 @@ create table if not exists clients (
 -- "elimina", se anonimizan sus datos personales y se marca aquí la fecha, en vez
 -- de borrar la fila (que rompería el historial por la FK on delete restrict).
 alter table clients add column if not exists anonymized_at timestamptz;
+-- Período de cobro del cliente (opcional, SIN default). null = "sin período"
+-- (se le cobra al momento). Permite filtrar los pedidos por ciclo de cobro.
+alter table clients add column if not exists payment_period text
+  check (payment_period in ('semanal', 'quincenal', 'mensual', 'trimestral'));
 
 -- ----------------------------------------------------------------------------
 --  Direcciones (un cliente puede tener varias)
@@ -833,6 +837,9 @@ grant execute on function public.delivery_summary(uuid, date, date) to authentic
 --  pedidos con sus columnas mínimas → mucho menos egress que descargar todo.
 --  SECURITY INVOKER: se apoya en RLS (sólo ve los pedidos de su empresa).
 -- ----------------------------------------------------------------------------
+-- Se recrea con el parámetro p_period (filtro por período de cobro del cliente);
+-- se elimina la firma anterior para no dejar una versión duplicada.
+drop function if exists public.search_order_ids(text, uuid, date, date, text, boolean, text, int, int);
 create or replace function public.search_order_ids(
   p_query   text    default null,
   p_client  uuid    default null,
@@ -841,6 +848,7 @@ create or replace function public.search_order_ids(
   p_status  text    default null,
   p_paid    boolean default null,
   p_method  text    default null,
+  p_period  text    default null,   -- null = todos; '__none__' = sin período; o el valor
   p_limit   int     default 10,
   p_offset  int     default 0
 )
@@ -854,6 +862,11 @@ language sql stable security invoker set search_path = public as $$
     and (p_status is null or o.status = p_status::order_status)
     and (p_paid   is null or o.paid = p_paid)
     and (p_method is null or o.payment_method = p_method::payment_method)
+    and (
+      p_period is null
+      or (p_period = '__none__' and c.payment_period is null)
+      or (p_period <> '__none__' and c.payment_period = p_period)
+    )
     and (p_from is null
          or (o.created_at at time zone 'America/Santiago')::date >= p_from)
     and (p_to is null
@@ -871,7 +884,7 @@ language sql stable security invoker set search_path = public as $$
   offset greatest(p_offset, 0)
 $$;
 
-grant execute on function public.search_order_ids(text, uuid, date, date, text, boolean, text, int, int) to authenticated;
+grant execute on function public.search_order_ids(text, uuid, date, date, text, boolean, text, text, int, int) to authenticated;
 
 -- ----------------------------------------------------------------------------
 --  Agregar company_id a todas las tablas de datos. El default lo llena solo

@@ -9,12 +9,24 @@ export interface OrderPayment {
   amount: number
 }
 
+// Período de cobro del cliente (opcional). null = "sin período" (cobro al momento).
+export type PaymentPeriod = 'semanal' | 'quincenal' | 'mensual' | 'trimestral'
+
+export const PAYMENT_PERIOD_LABELS: Record<PaymentPeriod, string> = {
+  semanal: 'Semanal',
+  quincenal: 'Quincenal',
+  mensual: 'Mensual',
+  trimestral: 'Trimestral',
+}
+
 export interface Client {
   id: string
   name: string
   surname: string
   national_id: string | null
   phone: string
+  // Período de cobro (null = sin período: se le cobra al momento).
+  payment_period: PaymentPeriod | null
   // Fecha de anonimización (derecho de supresión). null = cliente activo.
   anonymized_at: string | null
   created_at: string

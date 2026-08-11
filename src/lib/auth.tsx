@@ -3,9 +3,11 @@ import {
   createContext,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { supabase } from './supabase'
 import { getCompanySubscription } from '../api/billing'
 import type { Company, Profile } from '../types/auth'
@@ -59,6 +61,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [subscription, setSubscription] = useState<Subscription | null>(null)
   const [loading, setLoading] = useState(true)
   const [profileLoading, setProfileLoading] = useState(false)
+  const qc = useQueryClient()
+  // Último usuario cuyos datos se cargaron. Sirve para limpiar el caché cuando
+  // cambia de cuenta (o se cierra sesión) y no mostrar info del usuario anterior.
+  const loadedUserId = useRef<string | undefined>(undefined)
 
   async function loadProfileFor(userId: string | undefined) {
     if (!userId) {
@@ -91,12 +97,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let active = true
     supabase.auth.getSession().then(async ({ data }) => {
       if (!active) return
+      loadedUserId.current = data.session?.user.id
       setSession(data.session)
       await loadProfileFor(data.session?.user.id)
       setLoading(false)
     })
 
     const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
+      // Si cambió el usuario (login de otra cuenta o cierre de sesión), se
+      // vacía todo el caché de datos para no filtrar información entre cuentas.
+      const newUserId = s?.user?.id
+      if (newUserId !== loadedUserId.current) {
+        qc.clear()
+        loadedUserId.current = newUserId
+      }
       setSession(s)
       loadProfileFor(s?.user.id)
     })
@@ -104,6 +118,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       active = false
       sub.subscription.unsubscribe()
     }
+    // qc es estable (una sola instancia de QueryClient); el efecto corre una vez.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   async function signIn(email: string, password: string, captchaToken?: string) {
@@ -118,6 +134,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function signOut() {
     await supabase.auth.signOut()
+    // Vaciar el caché de datos para no dejar información del usuario que sale.
+    qc.clear()
+    loadedUserId.current = undefined
     setProfile(null)
     setCompany(null)
     setSubscription(null)

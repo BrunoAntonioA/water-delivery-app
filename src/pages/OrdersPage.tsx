@@ -20,7 +20,13 @@ import {
   listOpenRoutes,
   type OpenRouteOption,
 } from '../api/routes'
-import type { OrderDetail, OrderStatus, PaymentMethod } from '../types/db'
+import type {
+  OrderDetail,
+  OrderStatus,
+  PaymentMethod,
+  PaymentPeriod,
+} from '../types/db'
+import { PAYMENT_PERIOD_LABELS } from '../types/db'
 import {
   formatDate,
   formatDatePart,
@@ -126,6 +132,10 @@ export default function OrdersPage() {
     'all'
   )
   const [filterClientId, setFilterClientId] = useState('')
+  // Período de cobro: 'all' = todos; 'none' = sin período; o el valor concreto.
+  const [periodFilter, setPeriodFilter] = useState<'all' | 'none' | PaymentPeriod>(
+    'all'
+  )
   const [nameSearch, setNameSearch] = useState('')
   const [page, setPage] = useState(1)
 
@@ -142,7 +152,7 @@ export default function OrdersPage() {
   // Pedidos filtrados y paginados EN EL SERVIDOR (ver listOrdersPage). La clave
   // incluye todos los filtros (se refetchea al cambiarlos) y comparte el prefijo
   // ['orders'] con reportes/entregas, así invalidate() cubre todo.
-  const { data: ordersPage, isLoading } = useQuery({
+  const { data: ordersPage, isLoading, error: ordersError } = useQuery({
     queryKey: [
       'orders',
       'page',
@@ -154,6 +164,7 @@ export default function OrdersPage() {
         status: statusFilter,
         paid: paidFilter,
         method: paymentFilter,
+        period: periodFilter,
         page,
       },
     ],
@@ -166,6 +177,12 @@ export default function OrdersPage() {
         status: statusFilter === 'all' ? undefined : statusFilter,
         paid: paidFilter === 'all' ? undefined : paidFilter === 'paid',
         method: paymentFilter === 'all' ? undefined : paymentFilter,
+        period:
+          periodFilter === 'all'
+            ? undefined
+            : periodFilter === 'none'
+              ? '__none__'
+              : periodFilter,
         limit: PAGE_SIZE,
         offset: (page - 1) * PAGE_SIZE,
       }),
@@ -181,7 +198,8 @@ export default function OrdersPage() {
       nameSearch ||
       statusFilter !== 'all' ||
       paidFilter !== 'all' ||
-      paymentFilter !== 'all'
+      paymentFilter !== 'all' ||
+      periodFilter !== 'all'
   )
   function clearFilters() {
     setDateFrom('')
@@ -191,6 +209,7 @@ export default function OrdersPage() {
     setStatusFilter('all')
     setPaidFilter('all')
     setPaymentFilter('all')
+    setPeriodFilter('all')
     setPage(1)
   }
 
@@ -291,6 +310,7 @@ export default function OrdersPage() {
         surname: newClient.surname.trim(),
         national_id: '',
         phone: newClient.phone.trim(),
+        payment_period: null,
         addresses: [
           {
             label: 'Casa',
@@ -382,6 +402,12 @@ export default function OrdersPage() {
         </p>
       )}
 
+      {ordersError && (
+        <p className="mb-4 rounded-lg bg-red-50 px-4 py-2 text-sm text-red-700">
+          No se pudieron cargar los pedidos: {(ordersError as Error).message}
+        </p>
+      )}
+
       {(total > 0 || hasFilters) && (
         <>
           <Card className="mb-4 p-4">
@@ -419,6 +445,29 @@ export default function OrdersPage() {
                 }}
                 label="Fecha de creación"
               />
+              <div>
+                <Label>Período de cobro</Label>
+                <select
+                  value={periodFilter}
+                  onChange={(e) => {
+                    setPeriodFilter(
+                      e.target.value as 'all' | 'none' | PaymentPeriod
+                    )
+                    setPage(1)
+                  }}
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                >
+                  <option value="all">Todos</option>
+                  <option value="none">Sin período (cobro al momento)</option>
+                  {(
+                    Object.keys(PAYMENT_PERIOD_LABELS) as PaymentPeriod[]
+                  ).map((p) => (
+                    <option key={p} value={p}>
+                      {PAYMENT_PERIOD_LABELS[p]}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:gap-6 sm:overflow-x-auto sm:pb-1">
@@ -561,9 +610,6 @@ export default function OrdersPage() {
                         <span className="min-w-0 flex-1 break-words">
                           📍 {o.address.address}
                           {o.address.comuna ? `, ${o.address.comuna}` : ''}
-                          {o.address.observation
-                            ? ` (${o.address.observation})`
-                            : ''}
                         </span>
                         <CopyButton
                           value={o.address.address}
@@ -586,7 +632,11 @@ export default function OrdersPage() {
                         />
                       </div>
                     )}
-                    <NoteInline note={o.notes} className="mt-2" />
+                    <NoteInline
+                      note={o.notes}
+                      observation={o.address?.observation}
+                      className="mt-2"
+                    />
                   </div>
 
                   {/* Editar / Eliminar (arriba a la derecha) */}
