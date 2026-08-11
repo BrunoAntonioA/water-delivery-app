@@ -14,6 +14,7 @@ import {
 } from '../api/orders'
 import { createClient, listClients } from '../api/clients'
 import { listProducts } from '../api/products'
+import { listSupplies } from '../api/supplies'
 import {
   addOrderToRoute,
   listOpenRoutes,
@@ -31,9 +32,10 @@ import { useIsMobile } from '../lib/useIsMobile'
 import {
   orderClientName,
   orderPaymentList,
-  returnedBidonesText,
+  returnedSuppliesText,
 } from '../lib/order'
 import { OrderItemsList } from '../components/OrderItems'
+import { NoteButton, NoteInline } from '../components/NoteButton'
 import { ClientCombobox } from '../components/ClientCombobox'
 import { Modal } from '../components/Modal'
 import { OrderActions } from '../components/OrderActions'
@@ -91,6 +93,15 @@ export default function OrdersPage() {
     queryKey: ['products'],
     queryFn: listProducts,
   })
+  const { data: supplies } = useQuery({
+    queryKey: ['supplies'],
+    queryFn: listSupplies,
+  })
+  const supplyName = useMemo(() => {
+    const m = new Map<string, string>()
+    supplies?.forEach((s) => m.set(s.id, s.name))
+    return m
+  }, [supplies])
 
   const [modalOpen, setModalOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -575,11 +586,7 @@ export default function OrdersPage() {
                         />
                       </div>
                     )}
-                    {o.notes && (
-                      <p className="mt-1 text-sm italic text-slate-500">
-                        “{o.notes}”
-                      </p>
-                    )}
+                    <NoteInline note={o.notes} className="mt-2" />
                   </div>
 
                   {/* Editar / Eliminar (arriba a la derecha) */}
@@ -609,11 +616,12 @@ export default function OrdersPage() {
                   <p className="font-bold text-slate-900">
                     Total: {formatMoney(o.total)}
                   </p>
-                  {o.status !== 'ordered' && o.returned_bidones != null && (
-                    <p className="mt-1 text-sm text-slate-600">
-                      ↩ {o.returned_bidones} bidones devueltos
-                    </p>
-                  )}
+                  {o.status !== 'ordered' &&
+                    returnedSuppliesText(o, supplyName) !== '—' && (
+                      <p className="mt-1 text-sm text-slate-600">
+                        ↩ Devuelto: {returnedSuppliesText(o, supplyName)}
+                      </p>
+                    )}
                   {o.paid ? (
                     <p className="mt-1 text-sm text-emerald-700">
                       ✓ Pagado:{' '}
@@ -686,6 +694,7 @@ export default function OrdersPage() {
                       onEdit={canEditOrder(o) ? () => openEdit(o) : undefined}
                       onDelete={() => setDeleteTarget(o)}
                       onAddToRoute={() => setAssignTarget(o)}
+                      supplyName={supplyName}
                     />
                   ))}
                 </tbody>
@@ -1072,12 +1081,14 @@ function OrderRow({
   onEdit,
   onDelete,
   onAddToRoute,
+  supplyName,
 }: {
   o: OrderDetail
   onChanged: () => void
   onEdit?: () => void
   onDelete: () => void
   onAddToRoute: () => void
+  supplyName: Map<string, string>
 }) {
   const clientName = orderClientName(o)
   const addressFull = o.address
@@ -1087,7 +1098,10 @@ function OrderRow({
     <tr className="border-b border-slate-100 last:border-0 [&>td]:align-middle [&>td]:text-center">
       <td className="px-3 py-2 font-medium text-slate-800">
         <div className="flex flex-col items-center gap-1">
-          <span>{clientName}</span>
+          <span className="flex items-center gap-1">
+            {clientName}
+            <NoteButton note={o.notes} observation={o.address?.observation} />
+          </span>
           {!o.client_id && (
             <span className="rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-800">
               Venta rápida
@@ -1138,7 +1152,7 @@ function OrderRow({
           .join(' + ') || '—'}
       </td>
       <td className="px-3 py-2 text-center tabular-nums text-slate-700">
-        {returnedBidonesText(o)}
+        {returnedSuppliesText(o, supplyName)}
       </td>
       <td className="w-16 whitespace-nowrap px-2 py-2 text-center text-slate-600">
         <div className="leading-tight">

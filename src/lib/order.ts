@@ -51,6 +51,31 @@ export function returnedBidonesText(order: {
 }
 
 /**
+ * Texto de los INSUMOS devueltos por el cliente ("2× Bidón 20L, 1× ..."). Si el
+ * pedido es antiguo (sólo tenía el conteo) cae al número. "—" si no aplica.
+ */
+export function returnedSuppliesText(
+  order: {
+    status: OrderStatus
+    returned_bidones: number | null
+    returned_supplies: { supply_id: string; quantity: number }[] | null
+  },
+  supplyName: Map<string, string>
+): string {
+  if (order.status === 'ordered') return '—'
+  const list = order.returned_supplies
+  if (list && list.length > 0) {
+    return list
+      .map((r) => `${r.quantity}× ${supplyName.get(r.supply_id) ?? 'Insumo'}`)
+      .join(', ')
+  }
+  if (order.returned_bidones != null && order.returned_bidones > 0) {
+    return String(order.returned_bidones)
+  }
+  return '—'
+}
+
+/**
  * Nombre a mostrar de un pedido: el del cliente registrado, o el nombre libre
  * de una venta rápida (sin cliente), o un texto por defecto.
  */

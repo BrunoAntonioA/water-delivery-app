@@ -131,6 +131,8 @@ export interface Order {
   // los montos es igual al total del pedido. Null en pedidos sin pago o antiguos.
   payments: OrderPayment[] | null
   returned_bidones: number | null
+  // Insumos devueltos por el cliente al entregar (tipo + cantidad).
+  returned_supplies: { supply_id: string; quantity: number }[] | null
   // Fecha de ENTREGA (se llena al marcar entregado; null si aún no se entrega).
   delivered_at: string | null
   notes: string | null

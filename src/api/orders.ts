@@ -229,19 +229,31 @@ export async function updateOrder(
   }
 }
 
+export interface ReturnedSupply {
+  supply_id: string
+  quantity: number
+}
+
 /**
- * Marca el pedido como ENTREGADO, guardando los bidones devueltos y el método de
- * pago acordado. Opcionalmente lo marca pagado en el mismo paso (payments).
+ * Marca el pedido como ENTREGADO, guardando los INSUMOS devueltos (tipo +
+ * cantidad) y el método de pago acordado. `returned_bidones` se guarda como la
+ * suma de cantidades, por compatibilidad. Opcionalmente lo marca pagado en el
+ * mismo paso (payments).
  */
 export async function markOrderDelivered(
   id: string,
-  returnedBidones: number,
+  returnedSupplies: ReturnedSupply[],
   paymentMethod: PaymentMethod,
   payments?: OrderPayment[] | null
 ): Promise<void> {
+  const totalReturned = returnedSupplies.reduce(
+    (sum, r) => sum + (Number(r.quantity) || 0),
+    0
+  )
   const patch: Record<string, unknown> = {
     status: 'delivered',
-    returned_bidones: returnedBidones,
+    returned_supplies: returnedSupplies,
+    returned_bidones: totalReturned,
     delivered_at: new Date().toISOString(),
     // Método acordado (o principal si ya pagó con el desglose).
     payment_method: payments?.length ? payments[0].method : paymentMethod,
@@ -255,11 +267,16 @@ export async function markOrderDelivered(
   if (error) throw error
 }
 
-/** Deshace la entrega: vuelve a 'ordered' y limpia los bidones devueltos. */
+/** Deshace la entrega: vuelve a 'ordered' y limpia los insumos devueltos. */
 export async function undeliverOrder(id: string): Promise<void> {
   const { error } = await supabase
     .from('orders')
-    .update({ status: 'ordered', returned_bidones: null, delivered_at: null })
+    .update({
+      status: 'ordered',
+      returned_bidones: null,
+      returned_supplies: null,
+      delivered_at: null,
+    })
     .eq('id', id)
   if (error) throw error
 }

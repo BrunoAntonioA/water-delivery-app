@@ -1,11 +1,13 @@
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import {
   markOrderDelivered,
   markOrderPaid,
   undeliverOrder,
   unmarkOrderPaid,
+  type ReturnedSupply,
 } from '../api/orders'
+import { listSupplies } from '../api/supplies'
 import type {
   OrderDetail,
   OrderPayment,
@@ -23,7 +25,7 @@ import {
 import { Modal } from './Modal'
 import { PAYMENT_LABELS } from './StatusBadge'
 import { TemplatePicker } from './TemplatePicker'
-import { Button, Label, TextInput } from './ui'
+import { Button, Label, NumberInput, TextInput } from './ui'
 
 // Redondea a 2 decimales para comparar montos sin errores de punto flotante.
 function round2(n: number): number {
@@ -60,7 +62,14 @@ export function OrderActions({
   const [splitPay, setSplitPay] = useState(false)
   const [payMethod2, setPayMethod2] = useState<PaymentMethod | ''>('')
   const [payAmount2, setPayAmount2] = useState('')
-  const [returned, setReturned] = useState('0')
+  // Insumos devueltos por el cliente (tipo + cantidad; se pueden agregar varios).
+  const [returnedItems, setReturnedItems] = useState<ReturnedSupply[]>([
+    { supply_id: '', quantity: 1 },
+  ])
+  const { data: supplies } = useQuery({
+    queryKey: ['supplies'],
+    queryFn: listSupplies,
+  })
   const [chargeOpen, setChargeOpen] = useState(false)
 
   const onUndoError = (err: unknown) =>
@@ -68,14 +77,14 @@ export function OrderActions({
 
   const deliverMutation = useMutation({
     mutationFn: ({
-      returnedBidones,
+      returnedSupplies,
       method,
       payments,
     }: {
-      returnedBidones: number
+      returnedSupplies: ReturnedSupply[]
       method: PaymentMethod
       payments?: OrderPayment[] | null
-    }) => markOrderDelivered(order.id, returnedBidones, method, payments),
+    }) => markOrderDelivered(order.id, returnedSupplies, method, payments),
     onSuccess: () => {
       onChanged()
       setDeliverOpen(false)
@@ -129,10 +138,23 @@ export function OrderActions({
     ? splitValid
     : Boolean(payMethod) && amountMatches
 
-  const returnedValid =
-    returned.trim() !== '' &&
-    Number.isInteger(Number(returned)) &&
-    Number(returned) >= 0
+  // Insumos devueltos válidos (con insumo elegido y cantidad > 0). Devolver algo
+  // es OPCIONAL: si no eligen nada, se entrega sin devoluciones.
+  const returnedSupplies: ReturnedSupply[] = returnedItems.filter(
+    (it) => it.supply_id && it.quantity > 0
+  )
+
+  function setReturnedItem(i: number, patch: Partial<ReturnedSupply>) {
+    setReturnedItems((l) =>
+      l.map((it, idx) => (idx === i ? { ...it, ...patch } : it))
+    )
+  }
+  function addReturnedRow() {
+    setReturnedItems((l) => [...l, { supply_id: '', quantity: 1 }])
+  }
+  function removeReturnedRow(i: number) {
+    setReturnedItems((l) => (l.length > 1 ? l.filter((_, idx) => idx !== i) : l))
+  }
 
   /** Arma el desglose de pago a partir del estado del formulario. */
   function buildPayments(): OrderPayment[] {
@@ -158,7 +180,7 @@ export function OrderActions({
 
   function openDeliver() {
     setAlsoPaid(false)
-    setReturned('0')
+    setReturnedItems([{ supply_id: '', quantity: 1 }])
     resetPayFields()
     setDeliverOpen(true)
   }
@@ -228,17 +250,16 @@ export function OrderActions({
         <form
           onSubmit={(e) => {
             e.preventDefault()
-            if (!returnedValid || !payMethod) return
-            const returnedBidones = Number(returned)
+            if (!payMethod) return
             if (alsoPaid) {
               if (!paymentReady) return
               deliverMutation.mutate({
-                returnedBidones,
+                returnedSupplies,
                 method: payMethod,
                 payments: buildPayments(),
               })
             } else {
-              deliverMutation.mutate({ returnedBidones, method: payMethod })
+              deliverMutation.mutate({ returnedSupplies, method: payMethod })
             }
           }}
           className="space-y-4"
@@ -246,20 +267,57 @@ export function OrderActions({
           <OrderSummary order={order} />
 
           <div>
-            <Label>Bidones devueltos *</Label>
-            <TextInput
-              type="number"
-              min="0"
-              step="1"
-              value={returned}
-              onChange={(e) => setReturned(e.target.value)}
-              placeholder="0"
-            />
-            {!returnedValid && (
-              <p className="mt-1 text-sm text-red-600">
-                Ingresa un número entero de bidones (0 o más).
-              </p>
-            )}
+            <div className="mb-1 flex items-center justify-between">
+              <Label>Insumos devueltos</Label>
+              <button
+                type="button"
+                onClick={addReturnedRow}
+                className="text-sm font-medium text-sky-600 hover:text-sky-700"
+              >
+                + Agregar insumo
+              </button>
+            </div>
+            <div className="space-y-2">
+              {returnedItems.map((it, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <select
+                    value={it.supply_id}
+                    onChange={(e) =>
+                      setReturnedItem(i, { supply_id: e.target.value })
+                    }
+                    className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                  >
+                    <option value="">Insumo…</option>
+                    {supplies?.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="w-16 shrink-0">
+                    <NumberInput
+                      min={1}
+                      value={it.quantity}
+                      onValueChange={(n) => setReturnedItem(i, { quantity: n })}
+                      className="text-center"
+                    />
+                  </div>
+                  {returnedItems.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeReturnedRow(i)}
+                      className="shrink-0 rounded-lg px-2 py-2 text-slate-400 hover:bg-slate-100 hover:text-red-600"
+                      aria-label="Quitar insumo"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+            <p className="mt-1 text-xs text-slate-400">
+              Si el cliente no devolvió nada, déjalo sin insumo.
+            </p>
           </div>
 
           <MethodSelector
@@ -321,9 +379,7 @@ export function OrderActions({
             </Button>
             <Button
               type="submit"
-              disabled={
-                busy || !returnedValid || !payMethod || (alsoPaid && !paymentReady)
-              }
+              disabled={busy || !payMethod || (alsoPaid && !paymentReady)}
             >
               {busy
                 ? 'Guardando…'

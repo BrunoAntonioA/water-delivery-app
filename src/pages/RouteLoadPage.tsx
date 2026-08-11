@@ -93,7 +93,7 @@ export default function RouteLoadPage() {
 
       <Card className="mb-4 flex items-center justify-between gap-3 p-4">
         <span className="flex items-center gap-2 text-sm font-medium text-slate-600">
-          <span aria-hidden>↩</span> Bidones devueltos en la ruta
+          <span aria-hidden>↩</span> Insumos devueltos en la ruta
         </span>
         <span className="text-2xl font-bold tabular-nums text-slate-900">
           {returnedTotal}

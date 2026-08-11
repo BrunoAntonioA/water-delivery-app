@@ -48,9 +48,10 @@ import {
 import {
   orderClientName,
   orderPaymentList,
-  returnedBidonesText,
+  returnedSuppliesText,
 } from '../lib/order'
 import { OrderItemsList } from '../components/OrderItems'
+import { NoteButton, NoteInline } from '../components/NoteButton'
 import { Modal } from '../components/Modal'
 import { OrderActions } from '../components/OrderActions'
 import { PaidBadge, PAYMENT_LABELS, StatusBadge } from '../components/StatusBadge'
@@ -97,31 +98,6 @@ function orderNoteParts(order: OrderDetail | null): { note: string; obs: string 
     note: order?.notes?.trim() || '',
     obs: order?.address?.observation?.trim() || '',
   }
-}
-
-function NoteLines({ note, obs }: { note: string; obs: string }) {
-  return (
-    <div className="space-y-0.5 text-xs leading-snug">
-      {obs && (
-        <p
-          className="flex items-start gap-1 text-slate-700"
-          title="Observación de la dirección"
-        >
-          <span aria-hidden>📍</span>
-          <span className="min-w-0 break-words">{obs}</span>
-        </p>
-      )}
-      {note && (
-        <p
-          className="flex items-start gap-1 text-slate-700"
-          title="Nota del pedido"
-        >
-          <span aria-hidden>📝</span>
-          <span className="min-w-0 break-words">{note}</span>
-        </p>
-      )}
-    </div>
-  )
 }
 
 function stopAddress(stop: RouteStopWithOrder): string {
@@ -1261,11 +1237,9 @@ function StopCells({
           )}
         </div>
       </td>
-      <td className="px-3 py-2 text-slate-600">
+      <td className="px-3 py-2 text-center text-slate-600">
         {note || obs ? (
-          <div className="max-w-[16rem]">
-            <NoteLines note={note} obs={obs} />
-          </div>
+          <NoteButton note={note} observation={obs} />
         ) : (
           <span className="text-slate-300">—</span>
         )}
@@ -1303,7 +1277,7 @@ function StopCells({
       )}
       {showReturned && (
         <td className="px-3 py-2 text-center tabular-nums text-slate-700">
-          {order ? returnedBidonesText(order) : '—'}
+          {order ? returnedSuppliesText(order, supplyName) : '—'}
         </td>
       )}
       <td className="px-3 py-2">
@@ -1545,17 +1519,15 @@ function StopCardInner({
               <CopyButton value={order.client.phone} label="Copiar teléfono" />
             </div>
           )}
-          {(note || obs) && (
-            <div className="mt-1.5 rounded-lg bg-amber-50 px-2 py-1.5">
-              <NoteLines note={note} obs={obs} />
-            </div>
-          )}
+          <NoteInline note={note} observation={obs} className="mt-1" />
           {order &&
             order.status !== 'ordered' &&
-            order.returned_bidones != null && (
-              <div className="mt-0.5 flex items-center gap-2 text-sm text-slate-600">
+            returnedSuppliesText(order, supplyName) !== '—' && (
+              <div className="mt-0.5 flex items-start gap-2 text-sm text-slate-600">
                 <span aria-hidden>↩</span>
-                <span>{order.returned_bidones} bidones devueltos</span>
+                <span className="min-w-0 break-words">
+                  Devuelto: {returnedSuppliesText(order, supplyName)}
+                </span>
               </div>
             )}
           {order && !order.paid && order.payment_method && (

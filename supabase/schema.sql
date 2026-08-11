@@ -199,6 +199,11 @@ alter table orders add column if not exists customer_name text;
 alter table orders alter column client_id drop not null;
 -- Bidones que el cliente devolvió al momento de la entrega.
 alter table orders add column if not exists returned_bidones integer;
+-- Insumos devueltos por el cliente al entregar (con tipo y cantidad):
+--   [{ "supply_id": "uuid", "quantity": 2 }, ...]
+-- returned_bidones se conserva como la SUMA de cantidades (compatibilidad con
+-- vistas/reportes antiguos que sólo mostraban un conteo).
+alter table orders add column if not exists returned_supplies jsonb;
 
 -- Fecha/hora de ENTREGA: se llena al marcar el pedido como entregado. Es la
 -- fecha que usan los reportes por repartidor (no la de creación).
