@@ -45,6 +45,8 @@ export interface Address {
 export interface Supply {
   id: string
   name: string
+  // ¿Es retornable? Sólo los retornables aparecen en devoluciones al entregar.
+  returnable: boolean
   created_at: string
 }
 

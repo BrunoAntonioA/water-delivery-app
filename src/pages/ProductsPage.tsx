@@ -8,7 +8,12 @@ import {
   uploadProductImage,
   type ProductInput,
 } from '../api/products'
-import { createSupply, listSupplies } from '../api/supplies'
+import {
+  createSupply,
+  listSupplies,
+  renameSupply,
+  setSupplyReturnable,
+} from '../api/supplies'
 import type { Product } from '../types/db'
 import { useAuth } from '../lib/auth'
 import { formatMoney } from '../lib/format'
@@ -79,6 +84,29 @@ export default function ProductsPage() {
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
   const [cols, setCols] = useState<Cols>(4)
+
+  // Administrador de insumos (crear, renombrar, marcar retornable).
+  const [suppliesModalOpen, setSuppliesModalOpen] = useState(false)
+  const [newInsumo, setNewInsumo] = useState('')
+  const invalidateSupplies = () =>
+    qc.invalidateQueries({ queryKey: ['supplies'] })
+  const createInsumoMutation = useMutation({
+    mutationFn: (name: string) => createSupply(name),
+    onSuccess: () => {
+      invalidateSupplies()
+      setNewInsumo('')
+    },
+  })
+  const returnableMutation = useMutation({
+    mutationFn: ({ id, returnable }: { id: string; returnable: boolean }) =>
+      setSupplyReturnable(id, returnable),
+    onSuccess: invalidateSupplies,
+  })
+  const renameSupplyMutation = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      renameSupply(id, name),
+    onSuccess: invalidateSupplies,
+  })
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -203,7 +231,17 @@ export default function ProductsPage() {
       <PageHeader
         title="Productos"
         subtitle="Tu catálogo de bidones y productos de agua."
-        action={<Button onClick={openNew}>+ Nuevo producto</Button>}
+        action={
+          <div className="flex gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => setSuppliesModalOpen(true)}
+            >
+              Insumos
+            </Button>
+            <Button onClick={openNew}>+ Nuevo producto</Button>
+          </div>
+        }
       />
 
       {isLoading ? (
@@ -492,6 +530,85 @@ export default function ProductsPage() {
             </Button>
           </div>
         </form>
+      </Modal>
+
+      {/* --- Administrar insumos (crear, renombrar, marcar retornable) --- */}
+      <Modal
+        open={suppliesModalOpen}
+        onClose={() => setSuppliesModalOpen(false)}
+        title="Insumos"
+      >
+        <p className="mb-3 text-sm text-slate-500">
+          Marca cuáles son <strong>retornables</strong> (bidones, etc.). Sólo
+          esos aparecen al registrar devoluciones en una entrega.
+        </p>
+
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (newInsumo.trim()) createInsumoMutation.mutate(newInsumo.trim())
+          }}
+          className="mb-4 flex gap-2"
+        >
+          <TextInput
+            value={newInsumo}
+            onChange={(e) => setNewInsumo(e.target.value)}
+            placeholder="Nuevo insumo (ej: Bidón 20L)"
+          />
+          <Button
+            type="submit"
+            disabled={!newInsumo.trim() || createInsumoMutation.isPending}
+          >
+            Agregar
+          </Button>
+        </form>
+
+        {!supplies || supplies.length === 0 ? (
+          <p className="text-sm text-slate-400">Aún no tienes insumos.</p>
+        ) : (
+          <div className="max-h-96 space-y-1 overflow-y-auto">
+            {supplies.map((s) => (
+              <div
+                key={s.id}
+                className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2"
+              >
+                <input
+                  defaultValue={s.name}
+                  onBlur={(e) => {
+                    const v = e.target.value.trim()
+                    if (v && v !== s.name)
+                      renameSupplyMutation.mutate({ id: s.id, name: v })
+                  }}
+                  className="min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-2 py-1 text-sm font-medium text-slate-800 outline-none hover:border-slate-200 focus:border-sky-500"
+                  aria-label="Nombre del insumo"
+                />
+                <label className="flex shrink-0 cursor-pointer items-center gap-2 text-sm">
+                  <span className="text-slate-500">Retornable</span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={s.returnable}
+                    onClick={() =>
+                      returnableMutation.mutate({
+                        id: s.id,
+                        returnable: !s.returnable,
+                      })
+                    }
+                    className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
+                      s.returnable ? 'bg-sky-600' : 'bg-slate-300'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+                        s.returnable ? 'translate-x-5' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </label>
+              </div>
+            ))}
+          </div>
+        )}
       </Modal>
     </div>
   )

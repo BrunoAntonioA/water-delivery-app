@@ -153,8 +153,11 @@ export function OrderActions({
     setReturnedItems((l) => [...l, { supply_id: '', quantity: 1 }])
   }
   function removeReturnedRow(i: number) {
-    setReturnedItems((l) => (l.length > 1 ? l.filter((_, idx) => idx !== i) : l))
+    setReturnedItems((l) => l.filter((_, idx) => idx !== i))
   }
+
+  // Sólo insumos retornables aparecen como opción de devolución.
+  const returnableSupplies = (supplies ?? []).filter((s) => s.returnable)
 
   /** Arma el desglose de pago a partir del estado del formulario. */
   function buildPayments(): OrderPayment[] {
@@ -180,7 +183,8 @@ export function OrderActions({
 
   function openDeliver() {
     setAlsoPaid(false)
-    setReturnedItems([{ supply_id: '', quantity: 1 }])
+    // Empieza SIN devoluciones: el usuario agrega sólo si el cliente devolvió algo.
+    setReturnedItems([])
     resetPayFields()
     setDeliverOpen(true)
   }
@@ -268,56 +272,60 @@ export function OrderActions({
 
           <div>
             <div className="mb-1 flex items-center justify-between">
-              <Label>Insumos devueltos</Label>
+              <Label>Insumos devueltos (opcional)</Label>
               <button
                 type="button"
                 onClick={addReturnedRow}
-                className="text-sm font-medium text-sky-600 hover:text-sky-700"
+                disabled={returnableSupplies.length === 0}
+                className="text-sm font-medium text-sky-600 hover:text-sky-700 disabled:text-slate-300"
               >
-                + Agregar insumo
+                + Agregar devolución
               </button>
             </div>
-            <div className="space-y-2">
-              {returnedItems.map((it, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <select
-                    value={it.supply_id}
-                    onChange={(e) =>
-                      setReturnedItem(i, { supply_id: e.target.value })
-                    }
-                    className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
-                  >
-                    <option value="">Insumo…</option>
-                    {supplies?.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="w-16 shrink-0">
-                    <NumberInput
-                      min={1}
-                      value={it.quantity}
-                      onValueChange={(n) => setReturnedItem(i, { quantity: n })}
-                      className="text-center"
-                    />
-                  </div>
-                  {returnedItems.length > 1 && (
+            {returnedItems.length === 0 ? (
+              <p className="text-sm text-slate-400">
+                {returnableSupplies.length === 0
+                  ? 'No hay insumos retornables. Márcalos en Productos → Insumos.'
+                  : 'Sin devoluciones. Agrega una sólo si el cliente devolvió algo.'}
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {returnedItems.map((it, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <select
+                      value={it.supply_id}
+                      onChange={(e) =>
+                        setReturnedItem(i, { supply_id: e.target.value })
+                      }
+                      className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                    >
+                      <option value="">Insumo…</option>
+                      {returnableSupplies.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="w-16 shrink-0">
+                      <NumberInput
+                        min={1}
+                        value={it.quantity}
+                        onValueChange={(n) => setReturnedItem(i, { quantity: n })}
+                        className="text-center"
+                      />
+                    </div>
                     <button
                       type="button"
                       onClick={() => removeReturnedRow(i)}
                       className="shrink-0 rounded-lg px-2 py-2 text-slate-400 hover:bg-slate-100 hover:text-red-600"
-                      aria-label="Quitar insumo"
+                      aria-label="Quitar devolución"
                     >
                       ✕
                     </button>
-                  )}
-                </div>
-              ))}
-            </div>
-            <p className="mt-1 text-xs text-slate-400">
-              Si el cliente no devolvió nada, déjalo sin insumo.
-            </p>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <MethodSelector

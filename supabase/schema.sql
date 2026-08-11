@@ -80,6 +80,10 @@ create table if not exists supplies (
   name       text not null,
   created_at timestamptz not null default now()
 );
+-- ¿El insumo es RETORNABLE? (bidones, etc.) Sólo los retornables aparecen como
+-- opción al registrar devoluciones en la entrega. Por defecto true para no
+-- cambiar el comportamiento previo; se desmarcan los que no se devuelven.
+alter table supplies add column if not exists returnable boolean not null default true;
 
 -- ----------------------------------------------------------------------------
 --  Productos

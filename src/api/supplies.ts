@@ -20,3 +20,24 @@ export async function createSupply(name: string): Promise<string> {
   if (error) throw error
   return data.id as string
 }
+
+/** Marca/desmarca un insumo como retornable. */
+export async function setSupplyReturnable(
+  id: string,
+  returnable: boolean
+): Promise<void> {
+  const { error } = await supabase
+    .from('supplies')
+    .update({ returnable })
+    .eq('id', id)
+  if (error) throw error
+}
+
+/** Renombra un insumo. */
+export async function renameSupply(id: string, name: string): Promise<void> {
+  const { error } = await supabase
+    .from('supplies')
+    .update({ name: name.trim() })
+    .eq('id', id)
+  if (error) throw error
+}
