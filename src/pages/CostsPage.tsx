@@ -77,6 +77,9 @@ export default function CostsPage() {
   const [editing, setEditing] = useState<CostWithCategory | null>(null)
   const [form, setForm] = useState<FormState>(emptyForm())
   const [newCat, setNewCat] = useState('')
+  // Creación de categoría dentro del formulario de costo.
+  const [showInlineCat, setShowInlineCat] = useState(false)
+  const [inlineCatName, setInlineCatName] = useState('')
   const [page, setPage] = useState(1)
 
   // Filtros. categoryFilter: '' = todas, '__none__' = sin categoría, o un id.
@@ -132,6 +135,17 @@ export default function CostsPage() {
     },
   })
 
+  // Crea la categoría desde el formulario de costo y la deja seleccionada.
+  const addInlineCatMutation = useMutation({
+    mutationFn: (name: string) => createCostCategory(name),
+    onSuccess: (newId) => {
+      invalidateCats()
+      setForm((f) => ({ ...f, category_id: newId }))
+      setInlineCatName('')
+      setShowInlineCat(false)
+    },
+  })
+
   const delCatMutation = useMutation({
     mutationFn: (id: string) => deleteCostCategory(id),
     onSuccess: () => {
@@ -143,6 +157,8 @@ export default function CostsPage() {
   function openNew() {
     setEditing(null)
     setForm(emptyForm())
+    setShowInlineCat(false)
+    setInlineCatName('')
     setModalOpen(true)
   }
 
@@ -155,6 +171,8 @@ export default function CostsPage() {
       category_id: c.category_id ?? '',
       amount: String(c.amount),
     })
+    setShowInlineCat(false)
+    setInlineCatName('')
     setModalOpen(true)
   }
 
@@ -423,25 +441,77 @@ export default function CostsPage() {
             </div>
           </div>
           <div>
-            <Label>Categoría</Label>
-            <select
-              value={form.category_id}
-              onChange={(e) =>
-                setForm({ ...form, category_id: e.target.value })
-              }
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-sky-500"
-            >
-              <option value="">Sin categoría</option>
-              {categories?.map((cat) => (
-                <option key={cat.id} value={cat.id}>
-                  {cat.name}
-                </option>
-              ))}
-            </select>
-            {categories && categories.length === 0 && (
-              <p className="mt-1 text-xs text-slate-400">
-                No tienes categorías. Créalas con el botón “Categorías”.
-              </p>
+            <div className="flex items-center justify-between">
+              <Label>Categoría</Label>
+              {!showInlineCat && (
+                <button
+                  type="button"
+                  onClick={() => setShowInlineCat(true)}
+                  className="text-sm font-medium text-sky-600 hover:underline"
+                >
+                  + Nueva categoría
+                </button>
+              )}
+            </div>
+            {!showInlineCat ? (
+              <select
+                value={form.category_id}
+                onChange={(e) =>
+                  setForm({ ...form, category_id: e.target.value })
+                }
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-sky-500"
+              >
+                <option value="">Sin categoría</option>
+                {categories?.map((cat) => (
+                  <option key={cat.id} value={cat.id}>
+                    {cat.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-3">
+                <div className="flex gap-2">
+                  <TextInput
+                    autoFocus
+                    value={inlineCatName}
+                    onChange={(e) => setInlineCatName(e.target.value)}
+                    placeholder="Nombre de la categoría"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        if (inlineCatName.trim())
+                          addInlineCatMutation.mutate(inlineCatName.trim())
+                      }
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    onClick={() =>
+                      addInlineCatMutation.mutate(inlineCatName.trim())
+                    }
+                    disabled={
+                      !inlineCatName.trim() || addInlineCatMutation.isPending
+                    }
+                  >
+                    {addInlineCatMutation.isPending ? 'Creando…' : 'Crear'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => {
+                      setShowInlineCat(false)
+                      setInlineCatName('')
+                    }}
+                  >
+                    Cancelar
+                  </Button>
+                </div>
+                {addInlineCatMutation.isError && (
+                  <p className="mt-2 text-sm text-red-600">
+                    Error: {(addInlineCatMutation.error as Error).message}
+                  </p>
+                )}
+              </div>
             )}
           </div>
 
@@ -451,7 +521,7 @@ export default function CostsPage() {
             </p>
           )}
 
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="sticky bottom-0 -mx-5 -mb-4 mt-2 flex flex-wrap justify-end gap-2 border-t border-slate-100 bg-white px-5 py-3">
             <Button
               type="button"
               variant="secondary"

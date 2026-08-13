@@ -93,14 +93,17 @@ export function subscriptionActive(sub: Subscription | null): boolean {
 
 /**
  * Módulos efectivos de la empresa según su suscripción: durante la prueba se
- * usan los TRIAL_MODULES (Pro sin "usuarios"); con plan activo, los del plan;
- * si no hay suscripción (legado), la lista manual de la empresa.
+ * usan los módulos del plan "Prueba" (`trialModules`, editable desde el módulo
+ * Planes); con plan activo, los del plan; si no hay suscripción (legado), la
+ * lista manual de la empresa. Si el plan de prueba aún no se pudo cargar, se
+ * cae al respaldo fijo TRIAL_MODULES para no dejar a la empresa sin acceso.
  */
 export function resolvedCompanyModules(
   sub: Subscription | null,
-  companyModules: ModuleKey[] | undefined
+  companyModules: ModuleKey[] | undefined,
+  trialModules?: ModuleKey[]
 ): ModuleKey[] | undefined {
-  if (sub?.status === 'trialing') return TRIAL_MODULES
+  if (sub?.status === 'trialing') return trialModules ?? TRIAL_MODULES
   return sub?.plan?.modules ?? companyModules
 }
 

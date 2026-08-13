@@ -7,7 +7,12 @@ import { CompanyUsers } from '../components/CompanyUsers'
 import { CompanySubscription } from '../components/CompanySubscription'
 import { CompanyBackup } from '../components/CompanyBackup'
 import { CompanyClientsExport } from '../components/CompanyClientsExport'
-import { Card, EmptyState, PageHeader, Spinner } from '../components/ui'
+import {
+  CollapsibleCard,
+  EmptyState,
+  PageHeader,
+  Spinner,
+} from '../components/ui'
 
 export default function CompanyDetailPage() {
   const { id = '' } = useParams()
@@ -70,14 +75,10 @@ export default function CompanyDetailPage() {
       <CompanySubscription companyId={company.id} />
 
       {planModules ? (
-        <Card className="mb-6 p-4">
-          <h2 className="mb-1 font-semibold text-slate-900">
-            Módulos del plan
-          </h2>
-          <p className="mb-3 text-sm text-slate-500">
-            Esta empresa tiene un plan asignado: los módulos los define el plan.
-            Cambia de plan arriba para modificar el acceso.
-          </p>
+        <CollapsibleCard
+          title="Módulos del plan"
+          subtitle="Esta empresa tiene un plan asignado: los módulos los define el plan. Cambia de plan arriba para modificar el acceso."
+        >
           <div className="grid gap-2 sm:grid-cols-2">
             {COMPANY_MODULES.map((m) => {
               const on = planModules.includes(m)
@@ -102,15 +103,12 @@ export default function CompanyDetailPage() {
               )
             })}
           </div>
-        </Card>
+        </CollapsibleCard>
       ) : (
-        <Card className="mb-6 p-4">
-          <h2 className="mb-1 font-semibold text-slate-900">Módulos habilitados</h2>
-          <p className="mb-3 text-sm text-slate-500">
-            Sin plan asignado: controla manualmente qué puede ver esta empresa.
-            Los usuarios sólo verán los módulos permitidos por su rol y
-            habilitados aquí.
-          </p>
+        <CollapsibleCard
+          title="Módulos habilitados"
+          subtitle="Sin plan asignado: controla manualmente qué puede ver esta empresa. Los usuarios sólo verán los módulos permitidos por su rol y habilitados aquí."
+        >
           <div className="grid gap-2 sm:grid-cols-2">
             {COMPANY_MODULES.map((m) => {
               const on = enabled.has(m)
@@ -147,15 +145,19 @@ export default function CompanyDetailPage() {
               Error al guardar: {(modulesMutation.error as Error).message}
             </p>
           )}
-        </Card>
+        </CollapsibleCard>
       )}
 
       <CompanyBackup companyId={company.id} companyName={company.name} />
 
       <CompanyClientsExport companyId={company.id} companyName={company.name} />
 
-      <h2 className="mb-3 font-semibold text-slate-900">Usuarios</h2>
-      <CompanyUsers companyId={company.id} />
+      <CollapsibleCard
+        title="Usuarios"
+        subtitle="Usuarios de esta empresa y sus roles."
+      >
+        <CompanyUsers companyId={company.id} />
+      </CollapsibleCard>
     </div>
   )
 }

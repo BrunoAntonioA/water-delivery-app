@@ -162,6 +162,68 @@ export function Card({
   )
 }
 
+/**
+ * Tarjeta colapsable (acordeón): muestra sólo el título (y un subtítulo/insignia
+ * opcional) y despliega el contenido al hacer clic. Sirve para que una página no
+ * tenga toda la información abierta de golpe. Por defecto viene cerrada.
+ */
+export function CollapsibleCard({
+  title,
+  subtitle,
+  defaultOpen = false,
+  right,
+  children,
+}: {
+  title: string
+  subtitle?: string
+  defaultOpen?: boolean
+  right?: ReactNode
+  children: ReactNode
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <div className="mb-4 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-slate-50"
+      >
+        <span className="min-w-0 flex-1">
+          <span className="block font-semibold text-slate-900">{title}</span>
+          {subtitle && (
+            <span className="mt-0.5 block text-sm text-slate-500">
+              {subtitle}
+            </span>
+          )}
+        </span>
+        {right}
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          aria-hidden
+          className={`shrink-0 text-slate-400 transition-transform ${
+            open ? 'rotate-180' : ''
+          }`}
+        >
+          <path
+            d="M6 9l6 6 6-6"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>
+      {open && (
+        <div className="border-t border-slate-100 px-4 py-4">{children}</div>
+      )}
+    </div>
+  )
+}
+
 export function PageHeader({
   title,
   subtitle,
@@ -174,7 +236,9 @@ export function PageHeader({
   return (
     <div className="mb-6">
       <div className="flex items-start justify-between gap-3">
-        <h1 className="text-2xl font-bold text-slate-900">{title}</h1>
+        <h1 className="min-w-0 break-words text-2xl font-bold text-slate-900">
+          {title}
+        </h1>
         {action && <div className="shrink-0">{action}</div>}
       </div>
       {subtitle && <p className="mt-1 text-sm text-slate-500">{subtitle}</p>}

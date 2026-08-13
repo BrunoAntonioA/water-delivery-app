@@ -5,8 +5,12 @@ import {
   createCompany,
   createUser,
   deleteCompany,
+  isPaidCompany,
   listCompanies,
+  verifyPassword,
+  type CompanySummary,
 } from '../api/admin'
+import { useAuth } from '../lib/auth'
 import { formatDate } from '../lib/format'
 import { Modal } from '../components/Modal'
 import {
@@ -35,6 +39,7 @@ const emptyForm: FormState = {
 
 export default function CompaniesPage() {
   const qc = useQueryClient()
+  const { session } = useAuth()
   const { data: companies, isLoading } = useQuery({
     queryKey: ['companies'],
     queryFn: listCompanies,
@@ -42,6 +47,23 @@ export default function CompaniesPage() {
 
   const [modalOpen, setModalOpen] = useState(false)
   const [form, setForm] = useState<FormState>(emptyForm)
+
+  // Eliminación de empresa: exige escribir la contraseña del superadmin dos
+  // veces (segundo factor) antes de un borrado irreversible.
+  const [deleteTarget, setDeleteTarget] = useState<CompanySummary | null>(null)
+  const [pw1, setPw1] = useState('')
+  const [pw2, setPw2] = useState('')
+
+  function openDelete(c: CompanySummary) {
+    setDeleteTarget(c)
+    setPw1('')
+    setPw2('')
+  }
+  function closeDelete() {
+    setDeleteTarget(null)
+    setPw1('')
+    setPw2('')
+  }
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['companies'] })
 
@@ -63,9 +85,27 @@ export default function CompaniesPage() {
   })
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => deleteCompany(id),
-    onSuccess: invalidate,
+    mutationFn: async () => {
+      if (!deleteTarget) return
+      if (isPaidCompany(deleteTarget)) {
+        throw new Error(
+          'No se puede eliminar una empresa activa (pagada). Cancela o pausa su suscripción primero.'
+        )
+      }
+      const email = session?.user.email
+      if (!email) throw new Error('No se pudo identificar tu sesión.')
+      if (pw1 !== pw2) throw new Error('Las contraseñas no coinciden.')
+      const ok = await verifyPassword(email, pw1)
+      if (!ok) throw new Error('Contraseña incorrecta.')
+      await deleteCompany(deleteTarget.id)
+    },
+    onSuccess: () => {
+      invalidate()
+      closeDelete()
+    },
   })
+
+  const canDelete = pw1.length > 0 && pw1 === pw2
 
   function openNew() {
     setForm(emptyForm)
@@ -103,20 +143,19 @@ export default function CompaniesPage() {
                     · Creada {formatDate(c.created_at)}
                   </p>
                 </Link>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <Link to={`/empresas/${c.id}`}>
                     <Button variant="secondary">Ver usuarios</Button>
                   </Link>
                   <Button
                     variant="danger"
-                    onClick={() => {
-                      if (
-                        confirm(
-                          `¿Eliminar "${c.name}"? Se borrarán TODOS sus datos y usuarios.`
-                        )
-                      )
-                        deleteMutation.mutate(c.id)
-                    }}
+                    disabled={isPaidCompany(c)}
+                    title={
+                      isPaidCompany(c)
+                        ? 'Empresa activa: pausa o cancela su suscripción desde el detalle de la empresa para poder eliminarla.'
+                        : undefined
+                    }
+                    onClick={() => openDelete(c)}
                   >
                     Eliminar
                   </Button>
@@ -194,7 +233,7 @@ export default function CompaniesPage() {
             </p>
           )}
 
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="sticky bottom-0 -mx-5 -mb-4 mt-2 flex flex-wrap justify-end gap-2 border-t border-slate-100 bg-white px-5 py-3">
             <Button
               type="button"
               variant="secondary"
@@ -204,6 +243,85 @@ export default function CompaniesPage() {
             </Button>
             <Button type="submit" disabled={!canSave || createMutation.isPending}>
               {createMutation.isPending ? 'Creando…' : 'Crear empresa'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* --- Eliminar empresa: irreversible + doble contraseña --- */}
+      <Modal
+        open={deleteTarget != null}
+        onClose={closeDelete}
+        title="Eliminar empresa"
+      >
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (canDelete) deleteMutation.mutate()
+          }}
+          className="space-y-4"
+        >
+          <div className="rounded-lg border border-red-200 bg-red-50 p-3">
+            <p className="text-sm font-semibold text-red-800">
+              ⚠️ Esta acción es IRREVERSIBLE
+            </p>
+            <p className="mt-1 text-sm text-red-700">
+              Se eliminará <strong>«{deleteTarget?.name}»</strong> y se perderá{' '}
+              <strong>toda su información</strong>: usuarios, clientes, pedidos,
+              rutas, costos, suministros y suscripción. No se puede deshacer ni
+              recuperar.
+            </p>
+          </div>
+
+          <p className="text-sm text-slate-600">
+            Para confirmar, escribe <strong>tu contraseña de superadmin</strong>{' '}
+            dos veces.
+          </p>
+
+          <div>
+            <Label>Tu contraseña</Label>
+            <TextInput
+              type="password"
+              value={pw1}
+              onChange={(e) => setPw1(e.target.value)}
+              autoComplete="off"
+              placeholder="Contraseña"
+            />
+          </div>
+          <div>
+            <Label>Repite tu contraseña</Label>
+            <TextInput
+              type="password"
+              value={pw2}
+              onChange={(e) => setPw2(e.target.value)}
+              autoComplete="off"
+              placeholder="Contraseña"
+            />
+            {pw2.length > 0 && pw1 !== pw2 && (
+              <p className="mt-1 text-sm text-red-600">
+                Las contraseñas no coinciden.
+              </p>
+            )}
+          </div>
+
+          {deleteMutation.isError && (
+            <p className="text-sm text-red-600">
+              {(deleteMutation.error as Error).message}
+            </p>
+          )}
+
+          <div className="sticky bottom-0 -mx-5 -mb-4 mt-2 flex flex-wrap justify-end gap-2 border-t border-slate-100 bg-white px-5 py-3">
+            <Button type="button" variant="secondary" onClick={closeDelete}>
+              Cancelar
+            </Button>
+            <Button
+              type="submit"
+              variant="danger"
+              disabled={!canDelete || deleteMutation.isPending}
+            >
+              {deleteMutation.isPending
+                ? 'Eliminando…'
+                : 'Eliminar definitivamente'}
             </Button>
           </div>
         </form>

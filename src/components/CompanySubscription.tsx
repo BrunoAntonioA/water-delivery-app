@@ -11,13 +11,23 @@ import {
 } from '../api/billing'
 import { SUBSCRIPTION_STATUS_LABELS } from '../types/billing'
 import { formatMoney } from '../lib/format'
-import { Button, Card, Label, Spinner, TextInput } from './ui'
+import { Button, CollapsibleCard, Label, Spinner, TextInput } from './ui'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
 function fmtDate(iso: string | null): string {
   if (!iso) return 'sin vencimiento'
   return new Date(iso).toLocaleDateString('es-CL')
+}
+
+// Color del badge según el estado de la suscripción.
+const STATUS_CLASS: Record<string, string> = {
+  trialing: 'bg-amber-100 text-amber-800',
+  active: 'bg-emerald-100 text-emerald-800',
+  manual: 'bg-emerald-100 text-emerald-800',
+  past_due: 'bg-red-100 text-red-800',
+  paused: 'bg-slate-200 text-slate-600',
+  canceled: 'bg-red-100 text-red-800',
 }
 
 /**
@@ -113,140 +123,189 @@ export function CompanySubscription({ companyId }: { companyId: string }) {
 
   return (
     <>
-    <Card className="mb-6 p-4">
-      <h2 className="mb-1 font-semibold text-slate-900">Plan y suscripción</h2>
-      <p className="mb-3 text-sm text-slate-500">
-        Asigna el plan y administra el acceso de la empresa (activación manual).
-      </p>
+    <CollapsibleCard
+      title="Plan y suscripción"
+      subtitle="Asigna el plan y administra el acceso de la empresa (activación manual)."
+      right={
+        <span
+          className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+            sub ? STATUS_CLASS[sub.status] : 'bg-slate-200 text-slate-600'
+          }`}
+        >
+          {sub ? SUBSCRIPTION_STATUS_LABELS[sub.status] : 'Sin suscripción'}
+        </span>
+      }
+    >
 
       {/* Estado actual */}
-      <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-1 rounded-lg bg-slate-50 px-4 py-3 text-sm">
-        <span>
-          Estado:{' '}
-          <span className="font-semibold text-slate-800">
+      <div className="mb-5 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-lg bg-slate-50 px-4 py-3 text-sm">
+        <span className="flex items-center gap-2">
+          <span className="text-slate-500">Estado:</span>
+          <span
+            className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+              sub ? STATUS_CLASS[sub.status] : 'bg-slate-200 text-slate-600'
+            }`}
+          >
             {sub ? SUBSCRIPTION_STATUS_LABELS[sub.status] : 'Sin suscripción'}
           </span>
         </span>
-        {sub && (
-          <span className="text-slate-600">
-            Acceso hasta: {fmtDate(sub.access_until)}
+        {sub ? (
+          <span className="text-slate-500">
+            Acceso hasta:{' '}
+            <span className="font-medium text-slate-700">
+              {fmtDate(sub.access_until)}
+            </span>
           </span>
-        )}
-        {!sub && (
-          <span className="text-slate-400">
-            Empresa sin plan: acceso libre (legado).
-          </span>
+        ) : (
+          <span className="text-slate-400">Acceso libre (legado).</span>
         )}
       </div>
 
-      {/* Selección de plan */}
-      <div className="mb-4">
-        <Label>Plan</Label>
-        <select
-          value={planId}
-          disabled={busy}
-          onChange={(e) => save.mutate({ plan_id: e.target.value || null })}
-          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100 sm:w-auto"
-        >
-          <option value="">Sin plan</option>
-          {(plans ?? []).map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name} — {formatMoney(p.price)}/mes
-            </option>
-          ))}
-        </select>
+      {/* Plan y precio especial */}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div>
+          <Label>Plan</Label>
+          <select
+            value={planId}
+            disabled={busy}
+            onChange={(e) => save.mutate({ plan_id: e.target.value || null })}
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+          >
+            <option value="">Sin plan</option>
+            {(plans ?? []).map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name} — {formatMoney(p.price)}/mes
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <Label>Precio especial (opcional)</Label>
+          <div className="flex items-center gap-2">
+            <TextInput
+              type="number"
+              min="0"
+              step="1"
+              value={customPrice}
+              onChange={(e) => setCustomPrice(e.target.value)}
+              placeholder={
+                selectedPlan ? String(selectedPlan.price) : 'Precio del plan'
+              }
+              className="min-w-0 flex-1"
+            />
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={busy}
+              onClick={() =>
+                save.mutate({
+                  custom_price:
+                    customPrice.trim() === '' ? null : Number(customPrice),
+                })
+              }
+            >
+              Guardar
+            </Button>
+            {sub?.custom_price != null && (
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={busy}
+                onClick={() => {
+                  setCustomPrice('')
+                  save.mutate({ custom_price: null })
+                }}
+              >
+                Quitar
+              </Button>
+            )}
+          </div>
+          <p className="mt-1 text-xs text-slate-400">
+            Se cobra este monto (en vez del precio del plan) al pagar con Flow.
+            Requiere un plan asignado.
+          </p>
+        </div>
       </div>
 
-      {/* Precio especial (opcional): la empresa paga este monto con Flow */}
-      <div className="mb-4">
-        <Label>Precio especial (opcional)</Label>
-        <div className="flex flex-wrap items-end gap-2">
-          <TextInput
-            type="number"
-            min="0"
-            step="1"
-            value={customPrice}
-            onChange={(e) => setCustomPrice(e.target.value)}
-            placeholder={
-              selectedPlan ? String(selectedPlan.price) : 'Precio del plan'
-            }
-            className="sm:w-44"
-          />
+      <div className="my-5 border-t border-slate-100" />
+
+      {/* Acciones de acceso, agrupadas */}
+      <p className="mb-3 text-sm font-medium text-slate-700">
+        Acciones de acceso
+      </p>
+      <div className="grid gap-3 sm:grid-cols-3">
+        {/* Prueba */}
+        <div className="rounded-lg border border-slate-200 p-3">
+          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-400">
+            Prueba
+          </p>
           <Button
             type="button"
             variant="secondary"
+            className="w-full"
             disabled={busy}
-            onClick={() =>
-              save.mutate({
-                custom_price:
-                  customPrice.trim() === '' ? null : Number(customPrice),
-              })
-            }
+            onClick={startTrial}
           >
-            Guardar precio
+            🎁 Iniciar prueba ({selectedPlan?.trial_days ?? 10} días)
           </Button>
-          {sub?.custom_price != null && (
-            <Button
-              type="button"
-              variant="ghost"
-              disabled={busy}
-              onClick={() => {
-                setCustomPrice('')
-                save.mutate({ custom_price: null })
-              }}
-            >
-              Quitar
-            </Button>
-          )}
         </div>
-        <p className="mt-1 text-xs text-slate-400">
-          Si defines un precio especial, la empresa pagará ese monto (en vez del
-          precio del plan) al pagar con Flow. Requiere tener un plan asignado.
-        </p>
-      </div>
 
-      {/* Acciones de activación */}
-      <div className="flex flex-wrap items-end gap-3">
-        <Button type="button" variant="secondary" disabled={busy} onClick={startTrial}>
-          🎁 Iniciar prueba ({selectedPlan?.trial_days ?? 10} días)
-        </Button>
-
-        <div className="flex items-end gap-2">
-          <div>
-            <Label>Acceso hasta (opcional)</Label>
-            <input
-              type="date"
-              value={until}
-              onChange={(e) => setUntil(e.target.value)}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
-            />
-          </div>
-          <Button type="button" disabled={busy} onClick={activate}>
+        {/* Activación manual */}
+        <div className="rounded-lg border border-slate-200 p-3">
+          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-400">
+            Activar (manual)
+          </p>
+          <label className="mb-1 block text-xs text-slate-500">
+            Acceso hasta (opcional)
+          </label>
+          <input
+            type="date"
+            value={until}
+            onChange={(e) => setUntil(e.target.value)}
+            className="mb-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+          />
+          <Button
+            type="button"
+            className="w-full"
+            disabled={busy}
+            onClick={activate}
+          >
             ✓ Activar
           </Button>
         </div>
 
-        <Button
-          type="button"
-          variant="secondary"
-          disabled={busy || !sub}
-          onClick={() => save.mutate({ status: 'paused' })}
-        >
-          Pausar
-        </Button>
-        <Button
-          type="button"
-          variant="danger"
-          disabled={busy || !sub}
-          onClick={() =>
-            save.mutate({
-              status: 'canceled',
-              canceled_at: new Date().toISOString(),
-            })
-          }
-        >
-          Cancelar
-        </Button>
+        {/* Suspender */}
+        <div className="rounded-lg border border-slate-200 p-3">
+          <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-400">
+            Suspender acceso
+          </p>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              className="flex-1"
+              disabled={busy || !sub}
+              onClick={() => save.mutate({ status: 'paused' })}
+            >
+              Pausar
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
+              className="flex-1"
+              disabled={busy || !sub}
+              onClick={() =>
+                save.mutate({
+                  status: 'canceled',
+                  canceled_at: new Date().toISOString(),
+                })
+              }
+            >
+              Cancelar
+            </Button>
+          </div>
+        </div>
       </div>
 
       {save.isError && (
@@ -254,15 +313,13 @@ export function CompanySubscription({ companyId }: { companyId: string }) {
           Error al guardar: {(save.error as Error).message}
         </p>
       )}
-    </Card>
+    </CollapsibleCard>
 
     {/* Pagos registrados (los ve la empresa en su módulo Suscripción) */}
-    <Card className="mb-6 p-4">
-      <h2 className="mb-1 font-semibold text-slate-900">Pagos registrados</h2>
-      <p className="mb-3 text-sm text-slate-500">
-        Registra manualmente los pagos recibidos. La empresa los ve en su módulo
-        de Suscripción.
-      </p>
+    <CollapsibleCard
+      title="Pagos registrados"
+      subtitle="Registra manualmente los pagos recibidos. La empresa los ve en su módulo de Suscripción."
+    >
 
       <form
         onSubmit={(e) => {
@@ -366,7 +423,7 @@ export function CompanySubscription({ companyId }: { companyId: string }) {
           </table>
         </div>
       )}
-    </Card>
+    </CollapsibleCard>
     </>
   )
 }

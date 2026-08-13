@@ -1,12 +1,28 @@
 import { useState } from 'react'
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { useAuth } from './lib/auth'
+import { getTrialPlan } from './api/billing'
 import { effectiveModules, ROLE_LABELS, type ModuleKey } from './types/auth'
 import {
   subscriptionActive,
   accessDaysLeft,
   resolvedCompanyModules,
 } from './types/billing'
+
+/**
+ * Módulos del plan "Prueba" (editable en el módulo Planes). Se cargan una vez y
+ * se comparten por caché (misma queryKey). Se usan para resolver el acceso
+ * durante el período de prueba.
+ */
+function useTrialModules(): ModuleKey[] | undefined {
+  const { data } = useQuery({
+    queryKey: ['trial-plan'],
+    queryFn: getTrialPlan,
+    staleTime: 5 * 60_000,
+  })
+  return data?.modules as ModuleKey[] | undefined
+}
 import { Button, Spinner } from './components/ui'
 import { BillingWall } from './components/BillingWall'
 import ClientsPage from './pages/ClientsPage'
@@ -65,7 +81,12 @@ function Protected({
   children: React.ReactNode
 }) {
   const { profile, company, subscription } = useAuth()
-  const companyModules = resolvedCompanyModules(subscription, company?.modules)
+  const trialModules = useTrialModules()
+  const companyModules = resolvedCompanyModules(
+    subscription,
+    company?.modules,
+    trialModules
+  )
   const allowed = profile ? effectiveModules(profile.role, companyModules) : []
   if (!profile || !allowed.includes(module)) {
     return <Navigate to={home} replace />
@@ -122,6 +143,7 @@ export default function App() {
     useAuth()
   const location = useLocation()
   const [menuOpen, setMenuOpen] = useState(false)
+  const trialModules = useTrialModules()
 
   // Nueva contraseña: se llega por el enlace de recuperación (crea una sesión
   // temporal), así que debe mostrarse siempre, sin importar el estado de auth.
@@ -197,9 +219,14 @@ export default function App() {
     )
   }
 
-  // Durante la prueba se otorgan los módulos de prueba (Pro sin "usuarios");
-  // con plan activo, los del plan; si no (empresa "legado"), su lista manual.
-  const companyModules = resolvedCompanyModules(subscription, company?.modules)
+  // Durante la prueba se otorgan los módulos del plan "Prueba" (editable en el
+  // módulo Planes); con plan activo, los del plan; si no (empresa "legado"), su
+  // lista manual.
+  const companyModules = resolvedCompanyModules(
+    subscription,
+    company?.modules,
+    trialModules
+  )
   const allowed = effectiveModules(profile.role, companyModules)
   const navItems = NAV.filter((n) => allowed.includes(n.module))
   const home = navItems[0]?.to ?? '/'

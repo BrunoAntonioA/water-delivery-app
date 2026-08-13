@@ -15,12 +15,32 @@ export async function listPlans(): Promise<Plan[]> {
     .from('plans')
     .select('*')
     .eq('active', true)
+    .eq('is_public', true) // excluye planes internos como "Prueba"
     .order('sort', { ascending: true })
   if (error) {
     console.warn('No se pudieron cargar los planes:', error.message)
     return []
   }
   return (data ?? []) as Plan[]
+}
+
+/**
+ * Plan de PRUEBA (key 'prueba'): el que gobierna el período de prueba. Sus
+ * módulos y días definen lo que recibe una empresa en estado 'trialing'.
+ * Devuelve null si aún no existe (semilla no aplicada) para que el llamador use
+ * un respaldo. Legible por todos (política plans_read).
+ */
+export async function getTrialPlan(): Promise<Plan | null> {
+  const { data, error } = await supabase
+    .from('plans')
+    .select('*')
+    .eq('key', 'prueba')
+    .maybeSingle()
+  if (error) {
+    console.warn('No se pudo cargar el plan de prueba:', error.message)
+    return null
+  }
+  return (data as Plan | null) ?? null
 }
 
 /** Todos los planes (incluye inactivos), para el editor del superadmin. */
@@ -110,13 +130,13 @@ export interface SignupInput {
   phone: string
   rut: string
   razon_social: string
-  plan_id: string
   captchaToken?: string | null
 }
 
 /**
- * Crea la cuenta (admin), su empresa y una suscripción en prueba (7 días). Toda
- * la lógica corre en la Edge Function "signup-company" con el service role.
+ * Crea la cuenta (admin), su empresa y una suscripción en prueba. El plan y los
+ * días de la prueba los define el plan "Prueba" en la BD. Toda la lógica corre
+ * en la Edge Function "signup-company" con el service role.
  */
 export async function signupCompany(input: SignupInput): Promise<void> {
   const { error } = await supabase.functions.invoke('signup-company', {

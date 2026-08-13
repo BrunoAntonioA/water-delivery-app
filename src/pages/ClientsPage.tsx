@@ -246,9 +246,9 @@ export default function ClientsPage() {
             return (
             <Card key={c.id} className={`p-4 ${erased ? 'opacity-60' : ''}`}>
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
+                <div className="min-w-0 flex-1">
                   <p className="flex flex-wrap items-center gap-2 font-semibold text-slate-900">
-                    <span>
+                    <span className="break-words">
                       {c.name} {c.surname}
                     </span>
                     {erased && (
@@ -262,14 +262,14 @@ export default function ClientsPage() {
                       </span>
                     )}
                   </p>
-                  <p className="text-sm text-slate-500">
+                  <p className="text-sm text-slate-500 break-words">
                     📞 {c.phone || '—'}
                     {c.national_id ? ` · 🪪 ${c.national_id}` : ''}
                   </p>
                   {c.addresses.length > 0 && (
                     <ul className="mt-2 space-y-1 text-sm text-slate-600">
                       {c.addresses.map((a) => (
-                        <li key={a.id}>
+                        <li key={a.id} className="break-words">
                           📍 {a.label ? `${a.label}: ` : ''}
                           {a.address}
                           {a.comuna ? `, ${a.comuna}` : ''}
@@ -421,28 +421,19 @@ export default function ClientsPage() {
                       ✕
                     </button>
                   )}
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    <TextInput
-                      value={a.label}
-                      onChange={(e) =>
-                        updateAddress(i, { label: e.target.value })
-                      }
-                      placeholder="Etiqueta (Casa)"
-                    />
-                    <TextInput
-                      value={a.comuna}
-                      onChange={(e) =>
-                        updateAddress(i, { comuna: e.target.value })
-                      }
-                      placeholder="Comuna *"
-                    />
-                  </div>
                   <TextInput
                     value={a.address}
                     onChange={(e) =>
                       updateAddress(i, { address: e.target.value })
                     }
                     placeholder="Dirección completa *"
+                  />
+                  <TextInput
+                    value={a.comuna}
+                    onChange={(e) =>
+                      updateAddress(i, { comuna: e.target.value })
+                    }
+                    placeholder="Comuna *"
                     className="mt-2"
                   />
                   <TextInput
@@ -469,7 +460,7 @@ export default function ClientsPage() {
             </p>
           )}
 
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="sticky bottom-0 -mx-5 -mb-4 mt-2 flex flex-wrap justify-end gap-2 border-t border-slate-100 bg-white px-5 py-3">
             <Button
               type="button"
               variant="secondary"

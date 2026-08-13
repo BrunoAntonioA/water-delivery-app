@@ -119,9 +119,6 @@ export function OrderActions({
   const canCharge = !order.paid
   const total = order.total
 
-  // Pago con un solo método: el monto debe ser igual al total.
-  const amountMatches =
-    payAmount.trim() !== '' && round2(Number(payAmount)) === round2(total)
   // Pago dividido: dos métodos distintos, montos > 0 y suma igual al total.
   const splitSum = round2((Number(payAmount) || 0) + (Number(payAmount2) || 0))
   const splitValid =
@@ -133,10 +130,10 @@ export function OrderActions({
     Number(payAmount) > 0 &&
     Number(payAmount2) > 0 &&
     splitSum === round2(total)
-  // ¿El pago (uno o dos métodos) está listo para confirmar?
-  const paymentReady = splitPay
-    ? splitValid
-    : Boolean(payMethod) && amountMatches
+  // ¿El pago está listo? Con un solo método basta con elegir el método: el monto
+  // es automáticamente el total (no se pide). Con dos métodos, la suma debe dar
+  // el total.
+  const paymentReady = splitPay ? splitValid : Boolean(payMethod)
 
   // Insumos devueltos válidos (con insumo elegido y cantidad > 0). Devolver algo
   // es OPCIONAL: si no eligen nada, se entrega sin devoluciones.
@@ -359,7 +356,6 @@ export function OrderActions({
               total={total}
               amount={payAmount}
               setAmount={setPayAmount}
-              amountMatches={amountMatches}
               split={splitPay}
               setSplit={setSplitPay}
               method2={payMethod2}
@@ -377,7 +373,7 @@ export function OrderActions({
             </p>
           )}
 
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="sticky bottom-0 -mx-5 -mb-4 mt-2 flex flex-wrap justify-end gap-2 border-t border-slate-100 bg-white px-5 py-3">
             <Button
               type="button"
               variant="secondary"
@@ -421,7 +417,6 @@ export function OrderActions({
             total={total}
             amount={payAmount}
             setAmount={setPayAmount}
-            amountMatches={amountMatches}
             split={splitPay}
             setSplit={setSplitPay}
             method2={payMethod2}
@@ -438,7 +433,7 @@ export function OrderActions({
             </p>
           )}
 
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="sticky bottom-0 -mx-5 -mb-4 mt-2 flex flex-wrap justify-end gap-2 border-t border-slate-100 bg-white px-5 py-3">
             <Button
               type="button"
               variant="secondary"
@@ -546,15 +541,15 @@ function MoneyField({
 }
 
 /**
- * Monto(s) del pago. Con un método, el monto debe igualar el total. Al activar
- * "Pagó con dos métodos" aparece un segundo método+monto y la suma debe dar el
+ * Monto(s) del pago. Con UN método el monto es automáticamente el total del
+ * pedido: no se pide, sólo se muestra "Pago: $total" (más rápido). Al activar
+ * "Pagó con dos métodos" aparecen dos montos editables y la suma debe dar el
  * total del pedido.
  */
 function SplitPaymentSection({
   total,
   amount,
   setAmount,
-  amountMatches,
   split,
   setSplit,
   method1,
@@ -567,7 +562,6 @@ function SplitPaymentSection({
   total: number
   amount: string
   setAmount: (v: string) => void
-  amountMatches: boolean
   split: boolean
   setSplit: (b: boolean) => void
   method1: PaymentMethod | ''
@@ -579,65 +573,15 @@ function SplitPaymentSection({
 }) {
   const sumMatches = round2(splitSum) === round2(total)
   const sameMethod = split && Boolean(method2) && method1 === method2
-  return (
-    <div className="space-y-3">
-      <MoneyField
-        label={split ? 'Monto del pago 1 *' : 'Monto recibido *'}
-        amount={amount}
-        setAmount={setAmount}
-        placeholder={String(total)}
-      />
-      {!split && amount.trim() !== '' && !amountMatches && (
-        <p className="-mt-1 text-sm text-red-600">
-          El monto debe ser igual al total del pedido ({formatMoney(total)}).
-        </p>
-      )}
 
-      {split ? (
-        <div className="space-y-3 rounded-lg border border-slate-200 p-3">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-semibold text-slate-700">Pago 2</span>
-            <button
-              type="button"
-              onClick={() => {
-                setSplit(false)
-                setMethod2('' as PaymentMethod)
-                setAmount2('')
-              }}
-              className="text-sm font-medium text-red-600 hover:text-red-700"
-            >
-              Quitar
-            </button>
-          </div>
-          <MethodSelector
-            method={method2}
-            setMethod={setMethod2}
-            label="Método del pago 2 *"
-          />
-          <MoneyField
-            label="Monto del pago 2 *"
-            amount={amount2}
-            setAmount={setAmount2}
-          />
-          {sameMethod && (
-            <p className="text-sm text-red-600">
-              Usa un método distinto al del pago 1.
-            </p>
-          )}
-          <div
-            className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm ${
-              sumMatches
-                ? 'bg-emerald-50 text-emerald-700'
-                : 'bg-amber-50 text-amber-700'
-            }`}
-          >
-            <span>Suma de los pagos</span>
-            <span className="font-semibold tabular-nums">
-              {formatMoney(splitSum)} / {formatMoney(total)}
-            </span>
-          </div>
+  // Un solo método: el monto es el total, no editable.
+  if (!split) {
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center justify-between rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          <span className="font-medium">Pago</span>
+          <span className="font-bold tabular-nums">{formatMoney(total)}</span>
         </div>
-      ) : (
         <button
           type="button"
           onClick={() => setSplit(true)}
@@ -645,7 +589,61 @@ function SplitPaymentSection({
         >
           + Pagó con dos métodos
         </button>
-      )}
+      </div>
+    )
+  }
+
+  // Dos métodos: montos editables y la suma debe cuadrar con el total.
+  return (
+    <div className="space-y-3">
+      <MoneyField
+        label="Monto del pago 1 *"
+        amount={amount}
+        setAmount={setAmount}
+      />
+      <div className="space-y-3 rounded-lg border border-slate-200 p-3">
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-semibold text-slate-700">Pago 2</span>
+          <button
+            type="button"
+            onClick={() => {
+              setSplit(false)
+              setMethod2('' as PaymentMethod)
+              setAmount2('')
+            }}
+            className="text-sm font-medium text-red-600 hover:text-red-700"
+          >
+            Quitar
+          </button>
+        </div>
+        <MethodSelector
+          method={method2}
+          setMethod={setMethod2}
+          label="Método del pago 2 *"
+        />
+        <MoneyField
+          label="Monto del pago 2 *"
+          amount={amount2}
+          setAmount={setAmount2}
+        />
+        {sameMethod && (
+          <p className="text-sm text-red-600">
+            Usa un método distinto al del pago 1.
+          </p>
+        )}
+        <div
+          className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm ${
+            sumMatches
+              ? 'bg-emerald-50 text-emerald-700'
+              : 'bg-amber-50 text-amber-700'
+          }`}
+        >
+          <span>Suma de los pagos</span>
+          <span className="font-semibold tabular-nums">
+            {formatMoney(splitSum)} / {formatMoney(total)}
+          </span>
+        </div>
+      </div>
     </div>
   )
 }

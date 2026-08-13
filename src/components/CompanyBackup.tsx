@@ -5,7 +5,7 @@ import {
   toCsv,
   zipTextFiles,
 } from '../lib/exportFiles'
-import { Button, Card } from './ui'
+import { Button, CollapsibleCard } from './ui'
 
 function todayStamp(): string {
   const d = new Date()
@@ -109,12 +109,10 @@ export function CompanyBackup({
   }
 
   return (
-    <Card className="mb-6 p-4">
-      <h2 className="mb-1 font-semibold text-slate-900">Respaldo de datos</h2>
-      <p className="mb-3 text-sm text-slate-500">
-        Descarga la información de esta empresa para guardarla como copia de
-        seguridad.
-      </p>
+    <CollapsibleCard
+      title="Respaldo de datos"
+      subtitle="Descarga la información de esta empresa para guardarla como copia de seguridad."
+    >
 
       {/* Selección de qué exportar (por defecto, todo) */}
       <div className="mb-3">
@@ -197,6 +195,6 @@ export function CompanyBackup({
         en Excel/Sheets. Las imágenes de producto no se incluyen. Guarda el
         archivo en un lugar seguro y privado.
       </p>
-    </Card>
+    </CollapsibleCard>
   )
 }

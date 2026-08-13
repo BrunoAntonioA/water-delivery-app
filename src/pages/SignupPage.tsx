@@ -1,17 +1,18 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useSearchParams } from 'react-router-dom'
-import { listPlans, signupCompany } from '../api/billing'
+import { getTrialPlan, signupCompany } from '../api/billing'
 import { supabase } from '../lib/supabase'
-import { formatMoney } from '../lib/format'
 import { Turnstile, turnstileConfigured } from '../components/Turnstile'
 import { Button, Card, Label, TextInput } from '../components/ui'
 
-const TRIAL_DAYS = 10
-
 export default function SignupPage() {
-  const [params] = useSearchParams()
-  const { data: plans } = useQuery({ queryKey: ['plans'], queryFn: listPlans })
+  // Días de prueba definidos en el plan "Prueba" (editable en el módulo Planes).
+  const { data: trialPlan } = useQuery({
+    queryKey: ['trial-plan'],
+    queryFn: getTrialPlan,
+    staleTime: 5 * 60_000,
+  })
+  const trialDays = trialPlan?.trial_days ?? 10
 
   const [email, setEmail] = useState('')
   const [emailConfirm, setEmailConfirm] = useState('')
@@ -22,23 +23,11 @@ export default function SignupPage() {
   const [phone, setPhone] = useState('')
   const [rut, setRut] = useState('')
   const [razonSocial, setRazonSocial] = useState('')
-  const [planId, setPlanId] = useState('')
   const [captchaToken, setCaptchaToken] = useState<string | null>(null)
 
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [done, setDone] = useState(false)
-
-  // Plan preseleccionado desde la landing (?plan=pro) o el primero disponible.
-  const selectedPlan = useMemo(() => {
-    if (!plans?.length) return null
-    const fromQuery = params.get('plan')
-    const byQuery = fromQuery && plans.find((p) => p.key === fromQuery)
-    const byState = planId && plans.find((p) => p.id === planId)
-    return byState || byQuery || plans[0]
-  }, [plans, params, planId])
-
-  const effectivePlanId = planId || selectedPlan?.id || ''
 
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
   const emailsMatch = email.trim() !== '' && email.trim() === emailConfirm.trim()
@@ -57,7 +46,6 @@ export default function SignupPage() {
     phone.trim() !== '' &&
     rut.trim() !== '' &&
     razonSocial.trim() !== '' &&
-    Boolean(effectivePlanId) &&
     captchaSolved
 
   async function onSubmit(e: React.FormEvent) {
@@ -74,7 +62,6 @@ export default function SignupPage() {
         phone: phone.trim(),
         rut: rut.trim(),
         razon_social: razonSocial.trim(),
-        plan_id: effectivePlanId,
         captchaToken,
       })
       // No se inicia sesión: primero debe verificar su correo. Disparamos el
@@ -103,7 +90,7 @@ export default function SignupPage() {
           <p className="mt-2 text-sm text-slate-500">
             Enviamos un enlace de verificación a{' '}
             <span className="font-medium text-slate-700">{email.trim()}</span>.
-            Ábrelo para activar tu cuenta e iniciar tu prueba de {TRIAL_DAYS} días.
+            Ábrelo para activar tu cuenta e iniciar tu prueba de {trialDays} días.
           </p>
           <p className="mt-4 text-xs text-slate-400">
             ¿No lo ves? Revisa el spam. El enlace te llevará de vuelta a la
@@ -129,36 +116,21 @@ export default function SignupPage() {
             Crea tu empresa gratis
           </h1>
           <p className="text-sm text-slate-500">
-            {TRIAL_DAYS} días de prueba con todo incluido, sin tarjeta.
+            {trialDays} días de prueba con todo incluido, sin tarjeta.
           </p>
         </div>
 
         <form onSubmit={onSubmit} className="space-y-5">
-          {/* Plan */}
-          <div>
-            <Label>Elige tu plan</Label>
-            <div className="grid gap-3 sm:grid-cols-3">
-              {(plans ?? []).map((p) => {
-                const on = p.id === effectivePlanId
-                return (
-                  <button
-                    type="button"
-                    key={p.id}
-                    onClick={() => setPlanId(p.id)}
-                    className={`rounded-xl border p-3 text-left transition-colors ${
-                      on
-                        ? 'border-sky-500 bg-sky-50 ring-2 ring-sky-100'
-                        : 'border-slate-200 hover:bg-slate-50'
-                    }`}
-                  >
-                    <p className="font-semibold text-slate-900">{p.name}</p>
-                    <p className="text-sm text-slate-500">
-                      {formatMoney(p.price)}/mes
-                    </p>
-                  </button>
-                )
-              })}
-            </div>
+          {/* Plan de prueba (sin elección: todos parten con la prueba) */}
+          <div className="rounded-xl border border-sky-200 bg-sky-50 p-4">
+            <p className="font-semibold text-sky-900">
+              🎁 Prueba gratis de {trialDays} días
+            </p>
+            <p className="mt-1 text-sm text-sky-800">
+              Empiezas con el <strong>plan de prueba</strong>, que incluye casi
+              todo lo del plan <strong>Pro</strong>. Al terminar la prueba eliges
+              el plan que más te acomode. Sin tarjeta.
+            </p>
           </div>
 
           {/* Datos de acceso */}
@@ -285,7 +257,7 @@ export default function SignupPage() {
           </p>
 
           <Button type="submit" className="w-full" disabled={!canSubmit}>
-            {loading ? 'Creando tu cuenta…' : `Empezar prueba de ${TRIAL_DAYS} días`}
+            {loading ? 'Creando tu cuenta…' : `Empezar prueba de ${trialDays} días`}
           </Button>
 
           <p className="text-center text-sm text-slate-500">

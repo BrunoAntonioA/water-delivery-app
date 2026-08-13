@@ -2,7 +2,7 @@
 //   1) la cuenta de Auth (admin, email confirmado),
 //   2) la empresa (razón social + RUT + datos de contacto),
 //   3) el perfil (rol 'admin'),
-//   4) una suscripción en PRUEBA de 7 días con el plan elegido.
+//   4) una suscripción en PRUEBA con el plan "Prueba" (define módulos y días).
 //
 // No requiere sesión (es signup). Verifica el captcha de Cloudflare Turnstile si
 // hay TURNSTILE_SECRET configurado. El service role nunca sale al navegador.
@@ -69,8 +69,6 @@ Deno.serve(async (req) => {
   const phone = (body.phone ?? '').trim()
   const rut = (body.rut ?? '').trim()
   const razonSocial = (body.razon_social ?? '').trim()
-  const planId = (body.plan_id ?? '').trim()
-
   const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
   if (!emailOk) return json({ error: 'Correo inválido' }, 400)
   if (password.length < 8) {
@@ -80,22 +78,13 @@ Deno.serve(async (req) => {
   if (!phone || !rut || !razonSocial) {
     return json({ error: 'Faltan datos de la empresa (RUT, razón social, teléfono)' }, 400)
   }
-  if (!planId) return json({ error: 'Selecciona un plan' }, 400)
 
   // 2) Captcha (si está configurado).
   if (!(await verifyCaptcha(body.captchaToken))) {
     return json({ error: 'Verificación de seguridad fallida' }, 400)
   }
 
-  // 3) Validar que el plan exista.
-  const { data: plan } = await admin
-    .from('plans')
-    .select('id')
-    .eq('id', planId)
-    .maybeSingle()
-  if (!plan) return json({ error: 'Plan no válido' }, 400)
-
-  // 3b) RUT y teléfono únicos: no puede haber dos empresas con el mismo (el
+  // 3) RUT y teléfono únicos: no puede haber dos empresas con el mismo (el
   //     correo lo valida Auth al crear la cuenta). Se comparan normalizados.
   const { data: companies } = await admin
     .from('companies')
@@ -162,14 +151,22 @@ Deno.serve(async (req) => {
     return json({ error: profileErr.message }, 400)
   }
 
-  // 7) Crear la suscripción en PRUEBA (7 días). Los módulos durante la prueba
-  //    los define el frontend (TRIAL_MODULES = Pro sin "usuarios").
+  // 7) Crear la suscripción en PRUEBA. Todas arrancan en el plan "Prueba"
+  //    (key 'prueba'): sus módulos y días de prueba, editables desde el módulo
+  //    Planes, definen lo que recibe la empresa. Si aún no existe la semilla se
+  //    usa el respaldo TRIAL_DAYS y plan_id null.
+  const { data: trialPlan } = await admin
+    .from('plans')
+    .select('id, trial_days')
+    .eq('key', 'prueba')
+    .maybeSingle()
+  const trialDays = trialPlan?.trial_days ?? TRIAL_DAYS
   const accessUntil = new Date(
-    Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000
+    Date.now() + trialDays * 24 * 60 * 60 * 1000
   ).toISOString()
   const { error: subErr } = await admin.from('subscriptions').insert({
     company_id: company.id,
-    plan_id: planId,
+    plan_id: trialPlan?.id ?? null,
     status: 'trialing',
     access_until: accessUntil,
     trial_end: accessUntil,

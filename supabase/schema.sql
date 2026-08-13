@@ -433,6 +433,19 @@ values
 -- este archivo.
 on conflict (key) do nothing;
 
+-- Plan de PRUEBA: es el que "gobierna" el período de prueba. Sus módulos y sus
+-- días de prueba definen lo que recibe una empresa recién registrada mientras su
+-- suscripción está en estado 'trialing'. is_public = false → NO se ofrece en el
+-- registro ni en la landing; sólo se edita desde el módulo "Planes". sort 0 para
+-- que salga primero en el editor.
+insert into plans (key, name, description, price, modules, max_users, max_clients, trial_days, sort, is_public)
+values
+  ('prueba', 'Prueba',
+   'Plan con el que arrancan las empresas durante el período de prueba. Define los módulos y los días de la prueba.',
+   0, array['rutas','pedidos','clientes','productos','costos','entregas','reportes','plantillas','abastecimiento'],
+   null, null, 10, 0, false)
+on conflict (key) do nothing;
+
 create table if not exists subscriptions (
   id                       uuid primary key default gen_random_uuid(),
   company_id               uuid not null unique references companies (id) on delete cascade,

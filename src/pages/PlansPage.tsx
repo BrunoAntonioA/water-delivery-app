@@ -6,7 +6,7 @@ import type { Plan } from '../types/billing'
 import { formatMoney } from '../lib/format'
 import {
   Button,
-  Card,
+  CollapsibleCard,
   EmptyState,
   Label,
   PageHeader,
@@ -33,7 +33,7 @@ export default function PlansPage() {
       ) : !plans || plans.length === 0 ? (
         <EmptyState>No hay planes. Revisa la semilla de la base de datos.</EmptyState>
       ) : (
-        <div className="space-y-6">
+        <div>
           {plans.map((p) => (
             <PlanEditor key={p.id} plan={p} />
           ))}
@@ -92,24 +92,22 @@ function PlanEditor({ plan }: { plan: Plan }) {
       // Refresca todo lo que depende de los planes.
       qc.invalidateQueries({ queryKey: ['all-plans'] })
       qc.invalidateQueries({ queryKey: ['plans'] })
+      qc.invalidateQueries({ queryKey: ['trial-plan'] })
       qc.invalidateQueries({ queryKey: ['subscription'] })
     },
   })
 
   return (
-    <Card className="p-5">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg font-bold text-slate-900">
-          {plan.name}{' '}
-          <span className="ml-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">
-            {plan.key}
-          </span>
-        </h2>
-        <span className="text-sm text-slate-500">
-          {formatMoney(plan.price)} / {plan.interval === 'month' ? 'mes' : plan.interval}
+    <CollapsibleCard
+      title={plan.name}
+      subtitle={`Clave: ${plan.key}`}
+      right={
+        <span className="shrink-0 text-sm font-medium text-slate-500">
+          {formatMoney(plan.price)} /{' '}
+          {plan.interval === 'month' ? 'mes' : plan.interval}
         </span>
-      </div>
-
+      }
+    >
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
           <Label>Nombre</Label>
@@ -221,6 +219,6 @@ function PlanEditor({ plan }: { plan: Plan }) {
           </span>
         )}
       </div>
-    </Card>
+    </CollapsibleCard>
   )
 }

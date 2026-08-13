@@ -12,9 +12,15 @@ export async function listCostCategories(): Promise<CostCategory[]> {
   return (data ?? []) as CostCategory[]
 }
 
-export async function createCostCategory(name: string): Promise<void> {
-  const { error } = await supabase.from('cost_categories').insert({ name })
+/** Crea una categoría de costo y devuelve su id (para seleccionarla al vuelo). */
+export async function createCostCategory(name: string): Promise<string> {
+  const { data, error } = await supabase
+    .from('cost_categories')
+    .insert({ name })
+    .select('id')
+    .single()
   if (error) throw error
+  return data.id as string
 }
 
 export async function deleteCostCategory(id: string): Promise<void> {

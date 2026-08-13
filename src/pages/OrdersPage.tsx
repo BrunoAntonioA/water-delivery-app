@@ -17,8 +17,13 @@ import { listProducts } from '../api/products'
 import { listSupplies } from '../api/supplies'
 import {
   addOrderToRoute,
+  createRoute,
+  driverLabel,
+  listDrivers,
   listOpenRoutes,
+  type Driver,
   type OpenRouteOption,
+  type RouteInput,
 } from '../api/routes'
 import type {
   OrderDetail,
@@ -69,6 +74,24 @@ interface DraftItem {
 }
 
 const PAGE_SIZE = 10
+
+// ¿El texto buscado parece un teléfono? (≥6 dígitos y sólo caracteres de
+// teléfono: dígitos, +, espacios, guiones y paréntesis). Sirve para decidir si,
+// al crear un cliente nuevo, lo escrito va al campo Nombre o al campo Teléfono.
+function looksLikePhone(s: string): boolean {
+  const t = s.trim()
+  const digits = t.replace(/\D/g, '')
+  return digits.length >= 6 && /^[+\d\s()-]+$/.test(t)
+}
+
+// Fecha de hoy en formato YYYY-MM-DD (para el valor por defecto al crear ruta).
+function today(): string {
+  const now = new Date()
+  const y = now.getFullYear()
+  const m = String(now.getMonth() + 1).padStart(2, '0')
+  const d = String(now.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
 
 // Estado de ENTREGA (el pago va en su propio filtro).
 type StatusFilter = 'all' | OrderStatus
@@ -292,9 +315,36 @@ export default function OrdersPage() {
     enabled: assignTarget != null,
   })
 
+  // Repartidores para el formulario de "crear ruta" dentro del modal.
+  const { data: drivers } = useQuery({
+    queryKey: ['drivers'],
+    queryFn: listDrivers,
+    enabled: assignTarget != null,
+  })
+
   const addToRouteMutation = useMutation({
     mutationFn: ({ orderId, routeId }: { orderId: string; routeId: string }) =>
       addOrderToRoute(routeId, orderId),
+    onSuccess: () => {
+      invalidate()
+      qc.invalidateQueries({ queryKey: ['routes'] })
+      qc.invalidateQueries({ queryKey: ['open-routes'] })
+      setAssignTarget(null)
+    },
+  })
+
+  // Crea una ruta nueva y, en el acto, le agrega el pedido seleccionado.
+  const createRouteAndAddMutation = useMutation({
+    mutationFn: async ({
+      orderId,
+      input,
+    }: {
+      orderId: string
+      input: RouteInput
+    }) => {
+      const routeId = await createRoute(input)
+      await addOrderToRoute(routeId, orderId)
+    },
     onSuccess: () => {
       invalidate()
       qc.invalidateQueries({ queryKey: ['routes'] })
@@ -390,15 +440,16 @@ export default function OrdersPage() {
         title="Pedidos"
         subtitle="Crea pedidos, avanza su estado y cobra por WhatsApp."
         action={
-          <Button onClick={openNew} disabled={!clients?.length}>
+          <Button onClick={openNew} disabled={!products?.length}>
             + Nuevo pedido
           </Button>
         }
       />
 
-      {!clients?.length && (
+      {!products?.length && (
         <p className="mb-4 rounded-lg bg-amber-50 px-4 py-2 text-sm text-amber-800">
-          Necesitas al menos un cliente y un producto para crear pedidos.
+          Necesitas al menos un producto para crear pedidos. El cliente lo puedes
+          crear al momento.
         </p>
       )}
 
@@ -767,18 +818,30 @@ export default function OrdersPage() {
         title="Agregar pedido a una ruta"
         wide
       >
-        {addToRouteMutation.isError && (
+        {(addToRouteMutation.isError || createRouteAndAddMutation.isError) && (
           <p className="mb-3 text-sm text-red-600">
-            Error: {(addToRouteMutation.error as Error).message}
+            Error:{' '}
+            {
+              (
+                (addToRouteMutation.error ??
+                  createRouteAndAddMutation.error) as Error
+              ).message
+            }
           </p>
         )}
         <AddToRouteList
           routes={openRoutes ?? []}
+          drivers={drivers ?? []}
           onAdd={(routeId) =>
             assignTarget &&
             addToRouteMutation.mutate({ orderId: assignTarget.id, routeId })
           }
+          onCreate={(input) =>
+            assignTarget &&
+            createRouteAndAddMutation.mutate({ orderId: assignTarget.id, input })
+          }
           isPending={addToRouteMutation.isPending}
+          isCreating={createRouteAndAddMutation.isPending}
         />
       </Modal>
 
@@ -932,7 +995,14 @@ export default function OrdersPage() {
                     setAddressId('')
                   }}
                   onCreateNew={(q) => {
-                    setNewClient({ ...emptyNewClient, name: q })
+                    // Si lo escrito parece un teléfono, va al campo Teléfono;
+                    // si no, al campo Nombre.
+                    const isPhone = looksLikePhone(q)
+                    setNewClient({
+                      ...emptyNewClient,
+                      name: isPhone ? '' : q,
+                      phone: isPhone ? q : '',
+                    })
                     setNewClientMode(true)
                   }}
                 />
@@ -1101,7 +1171,7 @@ export default function OrdersPage() {
             </p>
           )}
 
-          <div className="flex justify-end gap-2">
+          <div className="sticky bottom-0 -mx-5 -mb-4 mt-2 flex flex-wrap justify-end gap-2 border-t border-slate-100 bg-white px-5 py-3">
             <Button
               type="button"
               variant="secondary"
@@ -1251,49 +1321,145 @@ function OrderRow({
   )
 }
 
-/** Lista de rutas ABIERTAS para asignarles el pedido. */
+/**
+ * Contenido del modal "Agregar pedido a una ruta": lista las rutas abiertas para
+ * elegir una, y permite crear una ruta nueva ahí mismo (útil cuando no hay
+ * ninguna). Al crearla, el pedido se agrega automáticamente a esa ruta.
+ */
 function AddToRouteList({
   routes,
+  drivers,
   onAdd,
+  onCreate,
   isPending,
+  isCreating,
 }: {
   routes: OpenRouteOption[]
+  drivers: Driver[]
   onAdd: (routeId: string) => void
+  onCreate: (input: RouteInput) => void
   isPending: boolean
+  isCreating: boolean
 }) {
-  if (routes.length === 0) {
-    return (
-      <p className="py-6 text-center text-sm text-slate-500">
-        No hay rutas abiertas. Crea una ruta en el módulo Rutas y vuelve a
-        intentarlo.
-      </p>
-    )
-  }
+  const busy = isPending || isCreating
+  // Si no hay rutas abiertas, el formulario aparece desplegado de una.
+  const [creating, setCreating] = useState(routes.length === 0)
+  const [form, setForm] = useState<RouteInput>({
+    name: '',
+    route_date: today(),
+    driver: '',
+    driver_id: null,
+    notes: '',
+  })
+
   return (
-    <div className="max-h-96 space-y-2 overflow-y-auto">
-      {routes.map((r) => (
-        <div
-          key={r.id}
-          className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2"
-        >
-          <div className="min-w-0">
-            <p className="truncate font-medium text-slate-800">
-              {r.name || 'Ruta sin nombre'}
-            </p>
-            <p className="truncate text-sm text-slate-500">
-              📅 {formatDateShort(r.route_date)} · 🚚{' '}
-              {r.driverName || 'Sin repartidor'}
-            </p>
-          </div>
-          <Button
-            variant="secondary"
-            onClick={() => onAdd(r.id)}
-            disabled={isPending}
-          >
-            Agregar
-          </Button>
+    <div className="space-y-3">
+      {routes.length > 0 && (
+        <div className="max-h-72 space-y-2 overflow-y-auto">
+          {routes.map((r) => (
+            <div
+              key={r.id}
+              className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2"
+            >
+              <div className="min-w-0">
+                <p className="truncate font-medium text-slate-800">
+                  {r.name || 'Ruta sin nombre'}
+                </p>
+                <p className="truncate text-sm text-slate-500">
+                  📅 {formatDateShort(r.route_date)} · 🚚{' '}
+                  {r.driverName || 'Sin repartidor'}
+                </p>
+              </div>
+              <Button
+                variant="secondary"
+                onClick={() => onAdd(r.id)}
+                disabled={busy}
+              >
+                Agregar
+              </Button>
+            </div>
+          ))}
         </div>
-      ))}
+      )}
+
+      {routes.length === 0 && !creating && (
+        <p className="text-center text-sm text-slate-500">
+          No hay rutas abiertas todavía.
+        </p>
+      )}
+
+      {!creating ? (
+        <button
+          type="button"
+          onClick={() => setCreating(true)}
+          className="w-full rounded-lg border border-dashed border-slate-300 py-2 text-sm font-medium text-sky-600 hover:bg-sky-50"
+        >
+          + Crear ruta nueva
+        </button>
+      ) : (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            onCreate(form)
+          }}
+          className="space-y-3 rounded-lg border border-slate-200 bg-slate-50/50 p-3"
+        >
+          <p className="text-sm font-semibold text-slate-700">Nueva ruta</p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <Label>Nombre</Label>
+              <TextInput
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                placeholder="Ruta Norte"
+              />
+            </div>
+            <div>
+              <Label>Fecha *</Label>
+              <TextInput
+                type="date"
+                value={form.route_date}
+                onChange={(e) =>
+                  setForm({ ...form, route_date: e.target.value })
+                }
+                required
+              />
+            </div>
+          </div>
+          <div>
+            <Label>Repartidor</Label>
+            <select
+              value={form.driver_id ?? ''}
+              onChange={(e) =>
+                setForm({ ...form, driver_id: e.target.value || null })
+              }
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-sky-500"
+            >
+              <option value="">Sin repartidor</option>
+              {drivers.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {driverLabel(d)}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex justify-end gap-2">
+            {routes.length > 0 && (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setCreating(false)}
+                disabled={busy}
+              >
+                Cancelar
+              </Button>
+            )}
+            <Button type="submit" disabled={!form.route_date || busy}>
+              {isCreating ? 'Creando…' : 'Crear y agregar'}
+            </Button>
+          </div>
+        </form>
+      )}
     </div>
   )
 }

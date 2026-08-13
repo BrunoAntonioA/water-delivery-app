@@ -307,7 +307,9 @@ export default function ProductsPage() {
               </div>
               <div className="p-4">
                 <div className="flex items-start justify-between gap-2">
-                  <p className="font-semibold text-slate-900">{p.name}</p>
+                  <p className="min-w-0 break-words font-semibold text-slate-900">
+                    {p.name}
+                  </p>
                   <p className="shrink-0 font-bold text-sky-700">
                     {formatMoney(p.price)}
                   </p>
@@ -514,7 +516,7 @@ export default function ProductsPage() {
             </p>
           )}
 
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="sticky bottom-0 -mx-5 -mb-4 mt-2 flex flex-wrap justify-end gap-2 border-t border-slate-100 bg-white px-5 py-3">
             <Button
               type="button"
               variant="secondary"

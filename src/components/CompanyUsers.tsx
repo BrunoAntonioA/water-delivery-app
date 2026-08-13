@@ -169,8 +169,8 @@ export function CompanyUsers({ companyId }: { companyId: string }) {
             return (
               <Card key={u.id} className={`p-4 ${u.active ? '' : 'opacity-60'}`}>
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="font-semibold text-slate-900">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-slate-900 break-words">
                       {u.full_name || u.email}
                       {isSelf && (
                         <span className="ml-2 text-xs text-slate-400">(tú)</span>
@@ -181,7 +181,7 @@ export function CompanyUsers({ companyId }: { companyId: string }) {
                         </span>
                       )}
                     </p>
-                    <p className="text-sm text-slate-500">{u.email}</p>
+                    <p className="text-sm text-slate-500 break-all">{u.email}</p>
                   </div>
                   <div className="flex items-center gap-2">
                     <select
@@ -309,7 +309,7 @@ export function CompanyUsers({ companyId }: { companyId: string }) {
             </p>
           )}
 
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="sticky bottom-0 -mx-5 -mb-4 mt-2 flex flex-wrap justify-end gap-2 border-t border-slate-100 bg-white px-5 py-3">
             <Button
               type="button"
               variant="secondary"
@@ -368,7 +368,7 @@ export function CompanyUsers({ companyId }: { companyId: string }) {
             </p>
           )}
 
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="sticky bottom-0 -mx-5 -mb-4 mt-2 flex flex-wrap justify-end gap-2 border-t border-slate-100 bg-white px-5 py-3">
             <Button
               type="button"
               variant="secondary"

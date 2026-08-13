@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { exportCompanyData } from '../api/admin'
 import { downloadBlob, toCsv } from '../lib/exportFiles'
-import { Button, Card } from './ui'
+import { Button, CollapsibleCard } from './ui'
 
 function todayStamp(): string {
   const d = new Date()
@@ -110,12 +110,10 @@ export function CompanyClientsExport({
   }
 
   return (
-    <Card className="mb-6 p-4">
-      <h2 className="mb-1 font-semibold text-slate-900">Lista de clientes</h2>
-      <p className="mb-3 text-sm text-slate-500">
-        Descarga una planilla con todos los clientes y sus direcciones juntas,
-        fácil de leer y de entregar a la empresa.
-      </p>
+    <CollapsibleCard
+      title="Lista de clientes"
+      subtitle="Descarga una planilla con todos los clientes y sus direcciones juntas, fácil de leer y de entregar a la empresa."
+    >
 
       <Button onClick={run} disabled={busy}>
         {busy ? 'Generando…' : '⬇️ Descargar clientes (CSV)'}
@@ -127,6 +125,6 @@ export function CompanyClientsExport({
         Se abre en Excel o Google Sheets. Un cliente con varias direcciones
         aparece en varias filas.
       </p>
-    </Card>
+    </CollapsibleCard>
   )
 }

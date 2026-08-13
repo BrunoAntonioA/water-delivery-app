@@ -5,18 +5,38 @@ import type { Company, Profile, Role } from '../types/auth'
 
 export interface CompanySummary extends Company {
   userCount: number
+  // Estado de la suscripción (null = sin suscripción / empresa "legado").
+  subscriptionStatus: string | null
 }
 
 export async function listCompanies(): Promise<CompanySummary[]> {
   const { data, error } = await supabase
     .from('companies')
-    .select('*, members:profiles(id)')
+    .select('*, members:profiles(id), subscription:subscriptions(status)')
     .order('created_at', { ascending: false })
   if (error) throw error
   return (data ?? []).map((c) => {
-    const { members, ...company } = c as Company & { members: { id: string }[] }
-    return { ...company, userCount: members?.length ?? 0 }
+    const { members, subscription, ...company } = c as Company & {
+      members: { id: string }[]
+      subscription: { status: string }[] | { status: string } | null
+    }
+    const sub = Array.isArray(subscription) ? subscription[0] : subscription
+    return {
+      ...company,
+      userCount: members?.length ?? 0,
+      subscriptionStatus: sub?.status ?? null,
+    }
   })
+}
+
+/**
+ * ¿La empresa está "pagada" (activa)? Sólo los estados 'active' (pago
+ * automático) y 'manual' (activada a mano) cuentan como pagadas. Estas empresas
+ * NO se pueden eliminar. El resto (prueba, pausada, vencida, cancelada o sin
+ * suscripción) sí.
+ */
+export function isPaidCompany(c: CompanySummary): boolean {
+  return c.subscriptionStatus === 'active' || c.subscriptionStatus === 'manual'
 }
 
 export async function getCompany(id: string): Promise<Company | null> {
@@ -62,6 +82,20 @@ export async function updateCompanyModules(
 export async function deleteCompany(id: string): Promise<void> {
   const { error } = await supabase.from('companies').delete().eq('id', id)
   if (error) throw error
+}
+
+/**
+ * Verifica la contraseña del usuario actual reautenticándolo. Devuelve true si
+ * es correcta. Al ser el MISMO usuario, la sesión sólo se refresca (no cambia de
+ * cuenta ni se limpia el caché). Se usa como segundo factor antes de acciones
+ * destructivas e irreversibles (p. ej. eliminar una empresa).
+ */
+export async function verifyPassword(
+  email: string,
+  password: string
+): Promise<boolean> {
+  const { error } = await supabase.auth.signInWithPassword({ email, password })
+  return !error
 }
 
 export interface CompanyExportBundle {
