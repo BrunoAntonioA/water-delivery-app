@@ -500,7 +500,7 @@ function MethodSelector({
             type="button"
             key={m}
             onClick={() => setMethod(m)}
-            className={`rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+            className={`rounded-lg border px-2 py-2 text-xs font-medium leading-tight break-words transition-colors sm:px-3 sm:text-sm ${
               method === m
                 ? 'border-sky-500 bg-sky-50 text-sky-700'
                 : 'border-slate-300 text-slate-600 hover:bg-slate-50'

@@ -245,8 +245,8 @@ export default function ClientsPage() {
             const erased = Boolean(c.anonymized_at)
             return (
             <Card key={c.id} className={`p-4 ${erased ? 'opacity-60' : ''}`}>
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
+              <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
+                <div className="min-w-0 sm:flex-1">
                   <p className="flex flex-wrap items-center gap-2 font-semibold text-slate-900">
                     <span className="break-words">
                       {c.name} {c.surname}
@@ -284,7 +284,7 @@ export default function ClientsPage() {
                   )}
                 </div>
                 {!erased && (
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-2 sm:shrink-0">
                     <Button
                       variant="success"
                       onClick={() => setContactClient(c)}

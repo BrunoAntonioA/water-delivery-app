@@ -27,6 +27,7 @@ import {
   TextInput,
 } from '../components/ui'
 import { DateRangeFilter } from '../components/DateRangeFilter'
+import { useIsMobile } from '../lib/useIsMobile'
 
 const PAGE_SIZE = 12
 
@@ -140,6 +141,19 @@ export default function AbastecimientoPage() {
     mutationFn: (id: string) => deleteSupplyPurchase(id),
     onSuccess: invalidatePurchases,
   })
+
+  const isMobile = useIsMobile()
+
+  function askDelete(p: SupplyPurchaseDetail) {
+    if (
+      confirm(
+        `¿Eliminar el suministro del ${shortDate(p.purchase_date)}${
+          p.provider ? ` (${p.provider.name})` : ''
+        }?`
+      )
+    )
+      deleteMutation.mutate(p.id)
+  }
 
   // Alta de proveedor desde el formulario: lo crea y lo deja seleccionado.
   const addProviderMutation = useMutation({
@@ -331,6 +345,60 @@ export default function AbastecimientoPage() {
         </EmptyState>
       ) : filtered.length === 0 ? (
         <EmptyState>No hay suministros con esos filtros.</EmptyState>
+      ) : isMobile ? (
+        <>
+          <div className="space-y-3">
+            {pageItems.map((p) => (
+              <Card key={p.id} className="p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-medium text-slate-800 break-words">
+                      {p.provider?.name ?? 'Sin proveedor'}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      {shortDate(p.purchase_date)}
+                    </p>
+                  </div>
+                  <p className="shrink-0 font-semibold text-slate-900">
+                    {formatMoney(p.total)}
+                  </p>
+                </div>
+                {p.items.length > 0 && (
+                  <ul className="mt-2 space-y-0.5 text-sm text-slate-600">
+                    {p.items.map((it) => (
+                      <li key={it.id} className="break-words">
+                        <span className="text-slate-800">
+                          {it.supply?.name ?? 'Insumo'}
+                        </span>{' '}
+                        <span className="text-slate-400">
+                          · {it.quantity} × {formatMoney(it.unit_price)} ={' '}
+                          {formatMoney(it.quantity * it.unit_price)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <div className="mt-3 flex gap-2">
+                  <Button
+                    variant="secondary"
+                    className="flex-1"
+                    onClick={() => openEdit(p)}
+                  >
+                    Editar
+                  </Button>
+                  <Button
+                    variant="danger"
+                    className="flex-1"
+                    onClick={() => askDelete(p)}
+                  >
+                    Eliminar
+                  </Button>
+                </div>
+              </Card>
+            ))}
+          </div>
+          <Pagination page={currentPage} pageCount={pageCount} onPage={setPage} />
+        </>
       ) : (
         <>
           <Card className="overflow-hidden">
@@ -381,19 +449,7 @@ export default function AbastecimientoPage() {
                           <Button variant="secondary" onClick={() => openEdit(p)}>
                             Editar
                           </Button>
-                          <Button
-                            variant="danger"
-                            onClick={() => {
-                              if (
-                                confirm(
-                                  `¿Eliminar el suministro del ${shortDate(p.purchase_date)}${
-                                    p.provider ? ` (${p.provider.name})` : ''
-                                  }?`
-                                )
-                              )
-                                deleteMutation.mutate(p.id)
-                            }}
-                          >
+                          <Button variant="danger" onClick={() => askDelete(p)}>
                             Eliminar
                           </Button>
                         </div>
