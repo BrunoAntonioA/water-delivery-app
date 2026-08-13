@@ -203,11 +203,11 @@ export default function TermsPage() {
               · WhatsApp{' '}
               <a
                 className="text-sky-600 hover:underline"
-                href="https://wa.me/56945652653"
+                href="https://wa.me/56941682843"
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                +56 9 4565 2653
+                +56 9 4168 2843
               </a>
               .
             </p>

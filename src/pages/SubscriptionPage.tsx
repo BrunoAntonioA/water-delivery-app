@@ -11,7 +11,7 @@ import { Card, EmptyState, PageHeader, Spinner } from '../components/ui'
 import { FlowCheckout } from '../components/FlowCheckout'
 
 // Número de contacto (WhatsApp) para solicitudes de pago/activación.
-const CONTACT_WHATSAPP = '56945652653'
+const CONTACT_WHATSAPP = '56941682843'
 
 const STATUS_CLASSES: Record<SubscriptionStatus, string> = {
   trialing: 'bg-amber-100 text-amber-800',

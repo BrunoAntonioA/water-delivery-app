@@ -60,7 +60,7 @@ export function BillingWall({
           </p>
           <div className="space-y-2 text-sm">
             <a
-              href="https://wa.me/56945652653?text=Hola,%20quiero%20activar%20mi%20plan"
+              href="https://wa.me/56941682843?text=Hola,%20quiero%20activar%20mi%20plan"
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 font-medium text-white transition-colors hover:bg-emerald-700"
