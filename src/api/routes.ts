@@ -327,13 +327,44 @@ export interface RouteLoadInput {
   quantity: number
 }
 
+export type RouteLoadKind = 'inicial' | 'adicional' | 'ajuste'
+
+export interface RouteLoadEvent {
+  id: string
+  route_id: string
+  kind: RouteLoadKind
+  items: { supply_id: string; quantity: number }[]
+  created_at: string
+}
+
 /**
- * Guarda la carga inicial de la ruta (por insumo, reemplaza la anterior) y marca
- * la carga como confirmada, para que el repartidor pueda ver los pedidos.
+ * Historial de cargas de una ruta (más antiguas primero). Tolera que la tabla
+ * aún no exista (migración no aplicada): devuelve [] en vez de romper la vista.
+ */
+export async function listRouteLoadEvents(
+  routeId: string
+): Promise<RouteLoadEvent[]> {
+  const { data, error } = await supabase
+    .from('route_load_events')
+    .select('id, route_id, kind, items, created_at')
+    .eq('route_id', routeId)
+    .order('created_at', { ascending: true })
+  if (error) {
+    console.warn('No se pudo cargar el historial de cargas:', error.message)
+    return []
+  }
+  return (data ?? []) as RouteLoadEvent[]
+}
+
+/**
+ * Guarda la carga de la ruta (por insumo, reemplaza el total anterior) y marca
+ * la carga como confirmada. Si se pasa `event`, además registra esa acción en el
+ * historial (`route_load_events`) con lo cargado en ESE momento.
  */
 export async function saveRouteLoads(
   routeId: string,
-  items: RouteLoadInput[]
+  items: RouteLoadInput[],
+  event?: { kind: RouteLoadKind; items: RouteLoadInput[] }
 ): Promise<void> {
   // Reemplazo total: borramos la carga previa y volvemos a insertar.
   const { error: delErr } = await supabase
@@ -354,11 +385,65 @@ export async function saveRouteLoads(
     if (insErr) throw insErr
   }
 
+  // Marca la carga como confirmada ANTES de tocar el historial: es lo crítico
+  // para el flujo de la ruta y no debe depender de que exista la tabla nueva.
   const { error: updErr } = await supabase
     .from('routes')
     .update({ load_confirmed: true })
     .eq('id', routeId)
   if (updErr) throw updErr
+
+  // Historial (best-effort): registra esta carga. Si la tabla aún no existe
+  // (migración no aplicada) o falla, NO se rompe el guardado de la carga.
+  const eventItems = (event?.items ?? []).filter(
+    (it) => it.supply_id && it.quantity > 0
+  )
+  if (event && eventItems.length > 0) {
+    const { error: evErr } = await supabase.from('route_load_events').insert({
+      route_id: routeId,
+      kind: event.kind,
+      items: eventItems,
+    })
+    if (evErr)
+      console.warn('No se pudo registrar el historial de carga:', evErr.message)
+  }
+}
+
+export interface RouteLoadRow {
+  supply_id: string
+  quantity: number
+  route_date: string
+  driver_id: string | null
+}
+
+/**
+ * Todas las cargas de ruta (carga inicial de insumos), con la fecha y el
+ * repartidor de su ruta. Sirve para el "Movimientos de insumos" del Resumen de
+ * entregas (columna Carga). Se filtra por fecha/repartidor en el cliente, igual
+ * que el resto de ese resumen.
+ */
+export async function listRouteLoads(): Promise<RouteLoadRow[]> {
+  const { data, error } = await supabase
+    .from('route_loads')
+    .select('supply_id, quantity, route:routes!inner(route_date, driver_id)')
+  if (error) throw error
+  type Row = {
+    supply_id: string
+    quantity: number
+    route:
+      | { route_date: string; driver_id: string | null }
+      | { route_date: string; driver_id: string | null }[]
+      | null
+  }
+  return ((data ?? []) as unknown as Row[]).map((r) => {
+    const route = Array.isArray(r.route) ? r.route[0] : r.route
+    return {
+      supply_id: r.supply_id,
+      quantity: r.quantity,
+      route_date: route?.route_date ?? '',
+      driver_id: route?.driver_id ?? null,
+    }
+  })
 }
 
 // --- Retiros de insumos (pickups): son paradas de la ruta como una venta rápida ---

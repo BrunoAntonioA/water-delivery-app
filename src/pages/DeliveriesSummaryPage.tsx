@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
-import { driverLabel, listDrivers } from '../api/routes'
+import { driverLabel, listDrivers, listRouteLoads } from '../api/routes'
 import { listOrders } from '../api/orders'
 import { listCosts } from '../api/costs'
 import { listProducts } from '../api/products'
@@ -62,6 +62,11 @@ export default function DeliveriesSummaryPage() {
   const { data: supplies } = useQuery({
     queryKey: ['supplies'],
     queryFn: listSupplies,
+  })
+  // Cargas de ruta (carga inicial): columna "Carga" de los movimientos de insumos.
+  const { data: routeLoads } = useQuery({
+    queryKey: ['route-loads'],
+    queryFn: listRouteLoads,
   })
 
   const inRange = (dateStr: string) =>
@@ -156,6 +161,68 @@ export default function DeliveriesSummaryPage() {
     })).sort((a, b) => b.qty - a.qty)
   }, [deliveredOrders, products, supplies])
 
+  // Movimientos de insumos por insumo: Carga (carga inicial de la ruta),
+  // Entregados (insumos que salieron en los productos entregados), Devueltos
+  // vacíos (insumos vacíos que el cliente devolvió) y En ruta = Carga −
+  // Entregados (lo lleno que debería quedar en el camión).
+  const movimientos = useMemo(() => {
+    const supplyName = new Map<string, string>()
+    supplies?.forEach((s) => supplyName.set(s.id, s.name))
+    const productSupply = new Map<
+      string,
+      { supply_id: string; quantity: number }[]
+    >()
+    products?.forEach((p) => {
+      if (p.supplies?.length) productSupply.set(p.id, p.supplies)
+    })
+
+    type Row = {
+      name: string
+      carga: number
+      entregados: number
+      devueltos: number
+    }
+    const map = new Map<string, Row>()
+    const row = (id: string): Row => {
+      let r = map.get(id)
+      if (!r) {
+        r = { name: supplyName.get(id) ?? 'Insumo', carga: 0, entregados: 0, devueltos: 0 }
+        map.set(id, r)
+      }
+      return r
+    }
+
+    // Carga (route_loads filtrados por repartidor + rango de fecha de la ruta).
+    for (const l of routeLoads ?? []) {
+      if (effectiveDriverId && l.driver_id !== effectiveDriverId) continue
+      if ((fromDate || toDate) && !inRange(l.route_date)) continue
+      row(l.supply_id).carga += l.quantity
+    }
+
+    // Entregados y Devueltos vacíos (de los pedidos entregados ya filtrados).
+    for (const o of deliveredOrders) {
+      for (const it of o.items) {
+        const links = productSupply.get(it.product_id)
+        if (!links) continue
+        for (const link of links) {
+          row(link.supply_id).entregados += it.quantity * link.quantity
+        }
+      }
+      for (const rs of o.returned_supplies ?? []) {
+        row(rs.supply_id).devueltos += rs.quantity
+      }
+    }
+
+    return Array.from(map, ([id, r]) => ({
+      id,
+      ...r,
+      enRuta: r.carga - r.entregados,
+    }))
+      .filter((r) => r.carga || r.entregados || r.devueltos)
+      .sort((a, b) => b.carga - a.carga || b.entregados - a.entregados)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeLoads, deliveredOrders, products, supplies, effectiveDriverId, fromDate, toDate])
+
   const totalUnits = useMemo(
     () => productsSummary.reduce((s, p) => s + p.qty, 0),
     [productsSummary]
@@ -178,7 +245,10 @@ export default function DeliveriesSummaryPage() {
     setToDate('')
   }
 
-  const hasData = productsSummary.length > 0 || suppliesSummary.length > 0
+  const hasData =
+    productsSummary.length > 0 ||
+    suppliesSummary.length > 0 ||
+    movimientos.length > 0
 
   function exportPdf() {
     if (!hasData) return
@@ -193,6 +263,21 @@ export default function DeliveriesSummaryPage() {
       company?.name,
       parts.join(' · ')
     )
+
+    if (movimientos.length) {
+      addReportTable(
+        r,
+        ['Insumo', 'Carga', 'Entregados', 'Devueltos vacíos', 'En ruta'],
+        movimientos.map((m) => [
+          m.name,
+          m.carga,
+          m.entregados,
+          m.devueltos,
+          m.enRuta,
+        ]),
+        { title: 'Movimientos de insumos' }
+      )
+    }
 
     if (suppliesSummary.length) {
       addReportTable(
@@ -335,6 +420,10 @@ export default function DeliveriesSummaryPage() {
             </span>
           </div>
 
+          <div className="mb-4">
+            <MovimientosCard rows={movimientos} />
+          </div>
+
           <div className="grid items-start gap-4 lg:grid-cols-2">
             <SummaryCard
               title="🛒 Insumos entregados"
@@ -350,6 +439,111 @@ export default function DeliveriesSummaryPage() {
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * Movimientos de insumos: por cada insumo muestra la Carga inicial de la ruta,
+ * lo Entregado, los Devueltos vacíos, y el resumen de lo que debería ir en el
+ * camión: En ruta (llenos = Carga − Entregados) + los vacíos devueltos.
+ */
+function MovimientosCard({
+  rows,
+}: {
+  rows: {
+    id: string
+    name: string
+    carga: number
+    entregados: number
+    devueltos: number
+    enRuta: number
+  }[]
+}) {
+  const tot = rows.reduce(
+    (a, r) => ({
+      carga: a.carga + r.carga,
+      entregados: a.entregados + r.entregados,
+      devueltos: a.devueltos + r.devueltos,
+      enRuta: a.enRuta + r.enRuta,
+    }),
+    { carga: 0, entregados: 0, devueltos: 0, enRuta: 0 }
+  )
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50 px-4 py-3 font-semibold text-slate-900">
+        🔄 Movimientos de insumos
+        <InfoHint text="Carga: insumos con que salió la ruta. Entregados: los que salieron en los productos entregados. Devueltos vacíos: envases vacíos que el cliente devolvió. En ruta = Carga − Entregados (llenos que deberían quedar en el camión)." />
+      </div>
+      {rows.length === 0 ? (
+        <p className="px-4 py-3 text-sm text-slate-500">
+          Sin movimientos en el período.
+        </p>
+      ) : (
+        <>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 text-xs uppercase text-slate-500">
+                  <th className="px-4 py-2 text-left">Insumo</th>
+                  <th className="px-3 py-2 text-right">Carga</th>
+                  <th className="px-3 py-2 text-right">Entregados</th>
+                  <th className="px-3 py-2 text-right">Devueltos vacíos</th>
+                  <th className="bg-sky-50 px-3 py-2 text-right text-sky-700">
+                    En ruta
+                    <span className="block font-normal normal-case text-sky-500">
+                      Carga − Entregados
+                    </span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr
+                    key={r.id}
+                    className="border-b border-slate-100 last:border-0"
+                  >
+                    <td className="px-4 py-2 text-slate-800">{r.name}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-700">
+                      {r.carga}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-700">
+                      {r.entregados}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums text-slate-700">
+                      {r.devueltos}
+                    </td>
+                    <td className="bg-sky-50 px-3 py-2 text-right font-semibold tabular-nums text-sky-800">
+                      {r.enRuta}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t border-slate-200 font-semibold text-slate-900">
+                  <td className="px-4 py-2 text-left">Total</td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {tot.carga}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {tot.entregados}
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    {tot.devueltos}
+                  </td>
+                  <td className="bg-sky-50 px-3 py-2 text-right tabular-nums text-sky-800">
+                    {tot.enRuta}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">
+            En el camión deberían ir: los <strong>llenos</strong> de la columna
+            «En ruta» + los <strong>vacíos</strong> de «Devueltos vacíos».
+          </p>
+        </>
+      )}
+    </Card>
   )
 }
 

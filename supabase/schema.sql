@@ -282,6 +282,22 @@ create table if not exists route_loads (
 );
 create index if not exists route_loads_route_id_idx on route_loads (route_id);
 
+-- Historial de cargas de la ruta: cada acción de carga (inicial o adicional)
+-- queda registrada con lo que se cargó en ESE momento. route_loads guarda el
+-- total vigente; esta tabla guarda el detalle de todas las cargas de la ruta.
+create table if not exists route_load_events (
+  id         uuid primary key default gen_random_uuid(),
+  route_id   uuid not null references routes (id) on delete cascade,
+  company_id uuid references companies (id) on delete cascade default current_company_id(),
+  kind       text not null default 'inicial'
+    check (kind in ('inicial', 'adicional', 'ajuste')),
+  items      jsonb not null default '[]'::jsonb, -- [{supply_id, quantity}] de esta carga
+  created_by uuid references profiles (id) default auth.uid(),
+  created_at timestamptz not null default now()
+);
+create index if not exists route_load_events_route_id_idx
+  on route_load_events (route_id);
+
 -- Migración: si route_loads era por producto (versión anterior), se convierte a
 -- por insumo. Las cargas viejas por producto se descartan (aún no había insumos).
 do $$
@@ -1190,6 +1206,24 @@ create policy "route_loads_select" on route_loads for select
     and (current_user_role() <> 'repartidor' or is_my_route(route_id))
   );
 create policy "route_loads_write" on route_loads for all
+  using (
+    company_id = current_company_id()
+    and (current_user_role() <> 'repartidor' or is_my_route(route_id))
+  )
+  with check (
+    company_id = current_company_id()
+    and (current_user_role() <> 'repartidor' or is_my_route(route_id))
+  );
+
+alter table route_load_events enable row level security;
+drop policy if exists "route_load_events_select" on route_load_events;
+drop policy if exists "route_load_events_write" on route_load_events;
+create policy "route_load_events_select" on route_load_events for select
+  using (
+    company_id = current_company_id()
+    and (current_user_role() <> 'repartidor' or is_my_route(route_id))
+  );
+create policy "route_load_events_write" on route_load_events for all
   using (
     company_id = current_company_id()
     and (current_user_role() <> 'repartidor' or is_my_route(route_id))
