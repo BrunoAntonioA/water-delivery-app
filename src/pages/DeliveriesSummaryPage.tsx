@@ -63,10 +63,12 @@ export default function DeliveriesSummaryPage() {
     queryKey: ['supplies'],
     queryFn: listSupplies,
   })
-  // Cargas de ruta (carga inicial): columna "Carga" de los movimientos de insumos.
+  // Cargas de ruta (carga inicial): columna "Carga" de los movimientos de
+  // insumos. Sólo aplica a admin/operador: los repartidores no ven esa tabla.
   const { data: routeLoads } = useQuery({
     queryKey: ['route-loads'],
     queryFn: listRouteLoads,
+    enabled: !isRepartidor,
   })
 
   const inRange = (dateStr: string) =>
@@ -245,10 +247,11 @@ export default function DeliveriesSummaryPage() {
     setToDate('')
   }
 
+  // Los movimientos de insumos son sólo para admin/operador.
+  const showMovimientos = !isRepartidor && movimientos.length > 0
+
   const hasData =
-    productsSummary.length > 0 ||
-    suppliesSummary.length > 0 ||
-    movimientos.length > 0
+    productsSummary.length > 0 || suppliesSummary.length > 0 || showMovimientos
 
   function exportPdf() {
     if (!hasData) return
@@ -264,7 +267,7 @@ export default function DeliveriesSummaryPage() {
       parts.join(' · ')
     )
 
-    if (movimientos.length) {
+    if (showMovimientos) {
       addReportTable(
         r,
         ['Insumo', 'Carga', 'Entregados', 'Devueltos vacíos', 'En ruta'],
@@ -420,9 +423,11 @@ export default function DeliveriesSummaryPage() {
             </span>
           </div>
 
-          <div className="mb-4">
-            <MovimientosCard rows={movimientos} />
-          </div>
+          {showMovimientos && (
+            <div className="mb-4">
+              <MovimientosCard rows={movimientos} />
+            </div>
+          )}
 
           <div className="grid items-start gap-4 lg:grid-cols-2">
             <SummaryCard
