@@ -267,21 +267,6 @@ export default function DeliveriesSummaryPage() {
       parts.join(' · ')
     )
 
-    if (showMovimientos) {
-      addReportTable(
-        r,
-        ['Insumo', 'Carga', 'Entregados', 'Devueltos vacíos', 'En ruta'],
-        movimientos.map((m) => [
-          m.name,
-          m.carga,
-          m.entregados,
-          m.devueltos,
-          m.enRuta,
-        ]),
-        { title: 'Movimientos de insumos' }
-      )
-    }
-
     if (suppliesSummary.length) {
       addReportTable(
         r,
@@ -297,6 +282,21 @@ export default function DeliveriesSummaryPage() {
       productsSummary.map((p) => [p.name, p.qty]),
       { title: `Productos entregados (${totalUnits} u.)` }
     )
+
+    if (showMovimientos) {
+      addReportTable(
+        r,
+        ['Insumo', 'Carga', 'Entregados', 'Devueltos vacíos', 'En ruta'],
+        movimientos.map((m) => [
+          m.name,
+          m.carga,
+          m.entregados,
+          m.devueltos,
+          m.enRuta,
+        ]),
+        { title: 'Movimientos de insumos' }
+      )
+    }
 
     saveReport(r, 'resumen-entregas.pdf')
   }
@@ -423,12 +423,6 @@ export default function DeliveriesSummaryPage() {
             </span>
           </div>
 
-          {showMovimientos && (
-            <div className="mb-4">
-              <MovimientosCard rows={movimientos} />
-            </div>
-          )}
-
           <div className="grid items-start gap-4 lg:grid-cols-2">
             <SummaryCard
               title="🛒 Insumos entregados"
@@ -441,6 +435,12 @@ export default function DeliveriesSummaryPage() {
               rows={productsSummary}
             />
           </div>
+
+          {showMovimientos && (
+            <div className="mt-4">
+              <MovimientosCard rows={movimientos} />
+            </div>
+          )}
         </div>
       )}
     </div>
