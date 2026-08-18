@@ -944,6 +944,31 @@ alter table supply_purchases add column if not exists company_id uuid references
 alter table supply_purchase_items add column if not exists company_id uuid references companies (id) on delete cascade default current_company_id();
 
 -- ----------------------------------------------------------------------------
+--  Índices multi-tenant. RLS filtra CADA consulta por company_id, así que sin
+--  estos índices las tablas se escanean completas y las listas se ponen lentas
+--  al crecer el historial y las empresas. Los COMPUESTOS cubren, en un solo
+--  índice, el filtro por empresa + el orden que usan las listas (así también
+--  aceleran el ORDER BY). Las tablas hijas (order_items, addresses, route_*,
+--  etc.) ya se consultan por su FK al padre —que sí está indexada—, por eso no
+--  se indexan por company_id aquí (evita costo de escritura innecesario).
+create index if not exists orders_company_created_idx
+  on orders (company_id, created_at desc);
+create index if not exists clients_company_created_idx
+  on clients (company_id, created_at desc);
+create index if not exists routes_company_date_idx
+  on routes (company_id, route_date desc);
+create index if not exists costs_company_date_idx
+  on costs (company_id, issue_date desc);
+create index if not exists supply_purchases_company_date_idx
+  on supply_purchases (company_id, purchase_date desc);
+
+create index if not exists products_company_id_idx on products (company_id);
+create index if not exists supplies_company_id_idx on supplies (company_id);
+create index if not exists providers_company_id_idx on providers (company_id);
+create index if not exists cost_categories_company_id_idx on cost_categories (company_id);
+create index if not exists whatsapp_templates_company_id_idx on whatsapp_templates (company_id);
+
+-- ----------------------------------------------------------------------------
 --  Auditoría: quién creó/modificó y cuándo (orders, costs, profiles). Lo llena
 --  automáticamente un trigger, así el frontend no puede falsear el autor.
 -- ----------------------------------------------------------------------------
