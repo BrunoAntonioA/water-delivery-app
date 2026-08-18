@@ -13,7 +13,9 @@ import {
 } from '../api/abastecimiento'
 import { createSupply, listSupplies } from '../api/supplies'
 import type { Provider, SupplyPurchaseDetail } from '../types/db'
+import { useAuth } from '../lib/auth'
 import { formatMoney } from '../lib/format'
+import { addReportTable, makeReportDoc, saveReport } from '../lib/reportPdf'
 import { Modal } from '../components/Modal'
 import {
   Button,
@@ -73,6 +75,7 @@ function lineTotal(it: ItemRow): number {
 
 export default function AbastecimientoPage() {
   const qc = useQueryClient()
+  const { company } = useAuth()
 
   const { data: purchases, isLoading } = useQuery({
     queryKey: ['supply_purchases'],
@@ -263,6 +266,48 @@ export default function AbastecimientoPage() {
     setPage(1)
   }
 
+  /** Exporta a PDF todos los suministros filtrados (con su detalle de insumos). */
+  function exportPdf() {
+    if (filtered.length === 0) return
+    const parts: string[] = []
+    if (providerFilter) {
+      const name =
+        providerFilter === '__none__'
+          ? 'Sin proveedor'
+          : providers?.find((p) => p.id === providerFilter)?.name || 'Proveedor'
+      parts.push(`Proveedor: ${name}`)
+    }
+    if (fromDate || toDate) {
+      parts.push(`Rango ${fromDate || '…'} a ${toDate || '…'}`)
+    }
+    parts.push(
+      `${filtered.length} ${filtered.length === 1 ? 'suministro' : 'suministros'} · Total ${formatMoney(totalSum)}`
+    )
+    parts.push(`Generado ${new Date().toLocaleDateString('es-CL')}`)
+
+    const r = makeReportDoc('Suministros', company?.name, parts.join(' · '))
+
+    const body = filtered.map((p) => [
+      shortDate(p.purchase_date),
+      p.provider?.name ?? 'Sin proveedor',
+      p.items.length
+        ? p.items
+            .map(
+              (it) =>
+                `${it.supply?.name ?? 'Insumo'}: ${it.quantity} × ${formatMoney(
+                  it.unit_price
+                )} = ${formatMoney(it.quantity * it.unit_price)}`
+            )
+            .join('\n')
+        : '—',
+      formatMoney(p.total),
+    ])
+    body.push(['', '', 'TOTAL', formatMoney(totalSum)])
+
+    addReportTable(r, ['Fecha', 'Proveedor', 'Insumos', 'Total'], body)
+    saveReport(r, `suministros-${today()}.pdf`)
+  }
+
   const validItems = form.items.filter(
     (it) => it.supply_id && Number(it.quantity) > 0
   )
@@ -274,7 +319,12 @@ export default function AbastecimientoPage() {
         title="Suministros"
         subtitle="Registra las compras de insumos: proveedor, cantidad y precio de cada uno."
         action={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            {filtered.length > 0 && (
+              <Button variant="secondary" onClick={exportPdf}>
+                ⬇ Descargar PDF
+              </Button>
+            )}
             <Button variant="secondary" onClick={() => setProvModalOpen(true)}>
               Proveedores
             </Button>
