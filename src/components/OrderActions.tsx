@@ -1,5 +1,6 @@
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
+import { patchOrderInCaches } from '../lib/queryInvalidation'
 import {
   markOrderDelivered,
   markOrderPaid,
@@ -53,6 +54,7 @@ export function OrderActions({
   className?: string
 }) {
   const { company } = useAuth()
+  const qc = useQueryClient()
   const [deliverOpen, setDeliverOpen] = useState(false)
   const [payOpen, setPayOpen] = useState(false)
   const [alsoPaid, setAlsoPaid] = useState(false)
@@ -72,8 +74,12 @@ export function OrderActions({
   })
   const [chargeOpen, setChargeOpen] = useState(false)
 
-  const onUndoError = (err: unknown) =>
+  // Ante un error: avisa y reconcilia (onChanged refetchea el estado real, lo
+  // que revierte el cambio optimista si la escritura falló).
+  const onUndoError = (err: unknown) => {
     alert(`No se pudo actualizar: ${(err as Error).message}`)
+    onChanged()
+  }
 
   const deliverMutation = useMutation({
     mutationFn: ({
@@ -85,28 +91,38 @@ export function OrderActions({
       method: PaymentMethod
       payments?: OrderPayment[] | null
     }) => markOrderDelivered(order.id, returnedSupplies, method, payments),
-    onSuccess: () => {
-      onChanged()
+    // Optimista: el pedido se ve "Entregado" (y pagado si corresponde) al toque.
+    onMutate: (vars) => {
       setDeliverOpen(false)
+      patchOrderInCaches(qc, order.id, {
+        status: 'delivered',
+        ...(vars.payments?.length ? { paid: true } : {}),
+      })
     },
+    onSuccess: onChanged,
+    onError: onUndoError,
   })
 
   const payMutation = useMutation({
     mutationFn: (payments: OrderPayment[]) => markOrderPaid(order.id, payments),
-    onSuccess: () => {
-      onChanged()
+    onMutate: () => {
       setPayOpen(false)
+      patchOrderInCaches(qc, order.id, { paid: true })
     },
+    onSuccess: onChanged,
+    onError: onUndoError,
   })
 
   const undeliverMutation = useMutation({
     mutationFn: () => undeliverOrder(order.id),
+    onMutate: () => patchOrderInCaches(qc, order.id, { status: 'ordered' }),
     onSuccess: onChanged,
     onError: onUndoError,
   })
 
   const unpayMutation = useMutation({
     mutationFn: () => unmarkOrderPaid(order.id),
+    onMutate: () => patchOrderInCaches(qc, order.id, { paid: false }),
     onSuccess: onChanged,
     onError: onUndoError,
   })

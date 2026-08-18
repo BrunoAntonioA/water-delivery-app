@@ -40,6 +40,7 @@ import {
   formatTimePart,
 } from '../lib/format'
 import { useIsMobile } from '../lib/useIsMobile'
+import { invalidateOrdersAndRoutes } from '../lib/queryInvalidation'
 import {
   orderClientName,
   orderPaymentList,
@@ -170,27 +171,32 @@ export default function OrdersPage() {
     return () => clearTimeout(id)
   }, [nameSearch])
 
-  const invalidate = () => qc.invalidateQueries({ queryKey: ['orders'] })
+  // Marca obsoletas las vistas de pedidos Y de rutas (un pedido puede estar en
+  // una ruta): así lo que cambias en Pedidos se refleja al abrir la Ruta.
+  const invalidate = () => invalidateOrdersAndRoutes(qc)
+
+  // Clave de la página actual de pedidos (incluye todos los filtros). Se reutiliza
+  // para actualizar la caché al vuelo al crear un pedido (aparece al instante).
+  const ordersPageKey = [
+    'orders',
+    'page',
+    {
+      q: searchQuery,
+      client: filterClientId,
+      from: dateFrom,
+      to: dateTo,
+      status: statusFilter,
+      paid: paidFilter,
+      method: paymentFilter,
+      period: periodFilter,
+      page,
+    },
+  ]
 
   // Pedidos filtrados y paginados EN EL SERVIDOR (ver listOrdersPage). La clave
-  // incluye todos los filtros (se refetchea al cambiarlos) y comparte el prefijo
-  // ['orders'] con reportes/entregas, así invalidate() cubre todo.
+  // comparte el prefijo ['orders'] con reportes/entregas, así invalidate() cubre todo.
   const { data: ordersPage, isLoading, error: ordersError } = useQuery({
-    queryKey: [
-      'orders',
-      'page',
-      {
-        q: searchQuery,
-        client: filterClientId,
-        from: dateFrom,
-        to: dateTo,
-        status: statusFilter,
-        paid: paidFilter,
-        method: paymentFilter,
-        period: periodFilter,
-        page,
-      },
-    ],
+    queryKey: ordersPageKey,
     queryFn: () =>
       listOrdersPage({
         query: searchQuery || undefined,
@@ -266,7 +272,7 @@ export default function OrdersPage() {
   )
 
   const saveMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (): Promise<string | null> => {
       const payload: OrderItemInput[] = items
         .filter((it) => it.product_id && it.quantity > 0)
         .map((it) => ({
@@ -282,11 +288,71 @@ export default function OrdersPage() {
         paid: formPaid,
         payment_method: formPaid ? (formMethod as PaymentMethod) : null,
       }
-      if (editingId) await updateOrder(editingId, input)
-      else await createOrder(input)
+      if (editingId) {
+        await updateOrder(editingId, input)
+        return null
+      }
+      return await createOrder(input)
     },
-    onSuccess: () => {
-      invalidate()
+    onSuccess: (newId) => {
+      // Inserción OPTIMISTA al crear: si el pedido nuevo pertenece sin ambigüedad
+      // al inicio de la vista actual (página 1, sin filtros), lo insertamos en la
+      // caché al instante y NO refetcheamos la lista (misma o menos egress). El
+      // resto de vistas se marca obsoleto para refrescarse al entrar.
+      if (newId && page === 1 && !hasFilters && selectedClient) {
+        const vItems = items.filter((it) => it.product_id && it.quantity > 0)
+        const total = vItems.reduce(
+          (s, it) => s + it.quantity * (productMap.get(it.product_id) ?? 0),
+          0
+        )
+        const optimistic: OrderDetail = {
+          id: newId,
+          client_id: clientId,
+          customer_name: null,
+          address_id: addressId || null,
+          status: 'ordered',
+          paid: formPaid,
+          total,
+          payment_method: formPaid ? (formMethod as PaymentMethod) : null,
+          paid_amount: formPaid ? total : null,
+          payments:
+            formPaid && formMethod
+              ? [{ method: formMethod as PaymentMethod, amount: total }]
+              : null,
+          returned_bidones: null,
+          returned_supplies: null,
+          delivered_at: null,
+          notes: notes || null,
+          created_at: new Date().toISOString(),
+          client: selectedClient,
+          address:
+            selectedClient.addresses.find((a) => a.id === addressId) ?? null,
+          items: vItems.map((it, i) => ({
+            id: `tmp-${i}`,
+            order_id: newId,
+            product_id: it.product_id,
+            quantity: it.quantity,
+            unit_price: productMap.get(it.product_id) ?? 0,
+            product: products?.find((p) => p.id === it.product_id) ?? null,
+          })),
+          driverId: null,
+          driverName: null,
+          routeDate: null,
+        }
+        qc.setQueryData(ordersPageKey, (old: unknown) => {
+          const data = old as { rows: OrderDetail[]; total: number } | undefined
+          if (!data?.rows) return old
+          return {
+            rows: [optimistic, ...data.rows].slice(0, PAGE_SIZE),
+            total: data.total + 1,
+          }
+        })
+        // Marca obsoletas las demás vistas SIN re-pedir la lista activa.
+        qc.invalidateQueries({ queryKey: ['orders'], refetchType: 'none' })
+        qc.invalidateQueries({ queryKey: ['assignable-orders'] })
+      } else {
+        invalidate()
+      }
       setModalOpen(false)
       setEditingId(null)
     },
@@ -327,8 +393,6 @@ export default function OrdersPage() {
       addOrderToRoute(routeId, orderId),
     onSuccess: () => {
       invalidate()
-      qc.invalidateQueries({ queryKey: ['routes'] })
-      qc.invalidateQueries({ queryKey: ['open-routes'] })
       setAssignTarget(null)
     },
   })
@@ -347,8 +411,6 @@ export default function OrdersPage() {
     },
     onSuccess: () => {
       invalidate()
-      qc.invalidateQueries({ queryKey: ['routes'] })
-      qc.invalidateQueries({ queryKey: ['open-routes'] })
       setAssignTarget(null)
     },
   })

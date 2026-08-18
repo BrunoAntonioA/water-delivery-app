@@ -52,6 +52,7 @@ import {
 } from '../lib/order'
 import { OrderItemsList } from '../components/OrderItems'
 import { NoteButton, NoteInline } from '../components/NoteButton'
+import { invalidateOrdersAndRoutes } from '../lib/queryInvalidation'
 import { Modal } from '../components/Modal'
 import { OrderActions } from '../components/OrderActions'
 import { PaidBadge, PAYMENT_LABELS, StatusBadge } from '../components/StatusBadge'
@@ -268,12 +269,9 @@ export default function RouteDetailPage() {
     })
   )
 
-  const invalidateRoute = () => {
-    qc.invalidateQueries({ queryKey: ['route', id] })
-    qc.invalidateQueries({ queryKey: ['assignable-orders'] })
-    qc.invalidateQueries({ queryKey: ['pending-pickups'] })
-    qc.invalidateQueries({ queryKey: ['routes'] })
-  }
+  // Cubre el detalle de la ruta Y las vistas de pedidos (un cambio en un pedido
+  // de la ruta debe reflejarse también en Pedidos/reportes al entrar).
+  const invalidateRoute = () => invalidateOrdersAndRoutes(qc)
 
   const reorderMutation = useMutation({
     mutationFn: (orderedIds: string[]) => reorderStops(orderedIds),
