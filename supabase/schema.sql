@@ -1721,3 +1721,18 @@ begin
   where (x ->> 'id') is null and coalesce(trim(x ->> 'address'), '') <> '';
 end$$;
 grant execute on function public.update_client(uuid, text, text, text, text, text, jsonb) to authenticated;
+
+-- Pedidos asignables a una ruta: en estado 'ordered' y que NO estén ya en una
+-- parada. Se resuelve EN EL SERVIDOR para no toparse con el tope de 1000 filas
+-- que ocurría al traer todas las paradas/pedidos al navegador (y baja egress).
+create or replace function public.assignable_order_ids()
+returns table(id uuid)
+language sql stable security definer set search_path = public as $$
+  select o.id
+  from orders o
+  where o.company_id = current_company_id()
+    and o.status = 'ordered'
+    and not exists (select 1 from route_stops rs where rs.order_id = o.id)
+  order by o.created_at desc
+$$;
+grant execute on function public.assignable_order_ids() to authenticated;

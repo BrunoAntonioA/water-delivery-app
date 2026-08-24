@@ -547,22 +547,24 @@ export async function reorderStops(
 
 /** Pedidos que aún no están asignados a ninguna ruta. */
 export async function listAssignableOrders(): Promise<OrderDetail[]> {
-  const { data: stops, error: stopsError } = await supabase
-    .from('route_stops')
-    .select('order_id')
-  if (stopsError) throw stopsError
-  const assigned = new Set((stops ?? []).map((s) => s.order_id as string))
+  // Los ids de pedidos asignables (sin entregar y sin ruta) los calcula el
+  // servidor: así no se topa con el límite de 1000 filas que tenía traer todas
+  // las paradas + todos los pedidos al navegador (por eso se colaban pedidos ya
+  // asignados), y se baja mucho menos egress.
+  const { data: idRows, error } = await supabase.rpc('assignable_order_ids')
+  if (error) throw error
+  const ids = ((idRows ?? []) as { id: string }[]).map((r) => r.id)
+  if (ids.length === 0) return []
 
-  const { data, error } = await supabase
+  const { data, error: e2 } = await supabase
     .from('orders')
     .select(
       '*, client:clients(id, name, surname, phone), address:addresses(id, address, comuna, observation), items:order_items(id, product_id, quantity, unit_price, product:products(id, name))'
     )
-    // Sólo pedidos SIN entregar: un pedido entregado no debe poder re-asignarse
-    // a una ruta (además reduce los datos que se descargan).
-    .eq('status', 'ordered')
-    .order('created_at', { ascending: false })
-  if (error) throw error
+    .in('id', ids)
+  if (e2) throw e2
 
-  return (data as OrderDetail[]).filter((o) => !assigned.has(o.id))
+  // `in` no conserva el orden: se reordena según los ids que devolvió la función.
+  const byId = new Map((data as OrderDetail[]).map((o) => [o.id, o]))
+  return ids.map((id) => byId.get(id)).filter(Boolean) as OrderDetail[]
 }
