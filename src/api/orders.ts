@@ -59,13 +59,26 @@ function mapOrderRow({ stops, ...o }: OrderRow): OrderDetail {
 }
 
 /** TODOS los pedidos (para reportes/entregas, que agregan sobre el período). */
+// Trae TODOS los pedidos (para reportes y resumen de entregas, que agregan en el
+// cliente). Supabase corta en 1000 filas por consulta, así que se pagina con
+// .range() hasta traerlos todos; si no, los reportes se quedarían cortos al
+// pasar los 1000 pedidos. Se ordena también por id para una paginación estable.
 export async function listOrders(): Promise<OrderDetail[]> {
-  const { data, error } = await supabase
-    .from('orders')
-    .select(ORDER_LIST_SELECT)
-    .order('created_at', { ascending: false })
-  if (error) throw error
-  return ((data ?? []) as OrderRow[]).map(mapOrderRow)
+  const PAGE = 1000
+  const all: OrderDetail[] = []
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from('orders')
+      .select(ORDER_LIST_SELECT)
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: true })
+      .range(from, from + PAGE - 1)
+    if (error) throw error
+    const batch = ((data ?? []) as OrderRow[]).map(mapOrderRow)
+    all.push(...batch)
+    if (batch.length < PAGE) break
+  }
+  return all
 }
 
 export interface OrdersPageFilters {

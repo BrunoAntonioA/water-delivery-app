@@ -391,10 +391,6 @@ export interface RouteLoadRow {
  * que el resto de ese resumen.
  */
 export async function listRouteLoads(): Promise<RouteLoadRow[]> {
-  const { data, error } = await supabase
-    .from('route_loads')
-    .select('supply_id, quantity, route:routes!inner(route_date, driver_id)')
-  if (error) throw error
   type Row = {
     supply_id: string
     quantity: number
@@ -403,15 +399,30 @@ export async function listRouteLoads(): Promise<RouteLoadRow[]> {
       | { route_date: string; driver_id: string | null }[]
       | null
   }
-  return ((data ?? []) as unknown as Row[]).map((r) => {
-    const route = Array.isArray(r.route) ? r.route[0] : r.route
-    return {
-      supply_id: r.supply_id,
-      quantity: r.quantity,
-      route_date: route?.route_date ?? '',
-      driver_id: route?.driver_id ?? null,
-    }
-  })
+  // Se pagina con .range(): Supabase corta en 1000 filas y las cargas superan
+  // ese número, así que la columna "Carga" del resumen quedaría corta.
+  const PAGE = 1000
+  const all: RouteLoadRow[] = []
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from('route_loads')
+      .select('supply_id, quantity, route:routes!inner(route_date, driver_id)')
+      .order('id', { ascending: true })
+      .range(from, from + PAGE - 1)
+    if (error) throw error
+    const batch = ((data ?? []) as unknown as Row[]).map((r) => {
+      const route = Array.isArray(r.route) ? r.route[0] : r.route
+      return {
+        supply_id: r.supply_id,
+        quantity: r.quantity,
+        route_date: route?.route_date ?? '',
+        driver_id: route?.driver_id ?? null,
+      }
+    })
+    all.push(...batch)
+    if (batch.length < PAGE) break
+  }
+  return all
 }
 
 // --- Retiros de insumos (pickups): son paradas de la ruta como una venta rápida ---
