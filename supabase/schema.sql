@@ -1430,3 +1430,294 @@ create policy "product_images_write" on storage.objects for all
 --     empresas y sus administradores. Para ver los datos que ya tenías en
 --     "Mi Empresa", crea (o asígnate) un usuario admin de esa empresa.
 -- ============================================================================
+
+-- ============================================================================
+--  ESCRITURAS ATÓMICAS (transacciones)
+--  Operaciones de varios pasos movidas a funciones para que sean TODO-O-NADA y
+--  seguras con usuarios concurrentes (evitan carreras y estados a medias, como
+--  el bug de pérdida de direcciones). Siguen el patrón de add_quick_sale:
+--  SECURITY DEFINER + validación manual de empresa/rol. Reemplazables sin
+--  bloquear tablas (create or replace).
+-- ============================================================================
+
+-- Crea un pedido con sus ítems en una sola transacción. Devuelve el id.
+create or replace function public.create_order(
+  p_client_id uuid,
+  p_address_id uuid,
+  p_notes text,
+  p_items jsonb,
+  p_paid boolean,
+  p_payment_method text
+) returns uuid
+language plpgsql security definer set search_path = public as $$
+declare
+  v_company uuid := current_company_id();
+  v_order   uuid;
+  v_total   numeric := 0;
+  it        jsonb;
+  v_pid     uuid;
+  v_qty     int;
+  v_price   numeric;
+begin
+  if v_company is null then raise exception 'No autorizado'; end if;
+  if p_client_id is null or not exists (
+    select 1 from clients c where c.id = p_client_id and c.company_id = v_company
+  ) then raise exception 'Cliente inválido'; end if;
+
+  insert into orders (company_id, client_id, address_id, notes, status, total,
+                      paid, payment_method, paid_amount, payments)
+  values (v_company, p_client_id, p_address_id, nullif(p_notes, ''), 'ordered', 0,
+          coalesce(p_paid, false), nullif(p_payment_method, '')::payment_method, null, null)
+  returning id into v_order;
+
+  for it in select * from jsonb_array_elements(coalesce(p_items, '[]'::jsonb))
+  loop
+    v_pid := (it ->> 'product_id')::uuid;
+    v_qty := greatest(1, coalesce((it ->> 'quantity')::int, 1));
+    v_price := coalesce((it ->> 'unit_price')::numeric, 0);
+    if not exists (select 1 from products where id = v_pid and company_id = v_company) then
+      raise exception 'Producto inválido';
+    end if;
+    insert into order_items (company_id, order_id, product_id, quantity, unit_price)
+    values (v_company, v_order, v_pid, v_qty, v_price);
+    v_total := v_total + v_qty * v_price;
+  end loop;
+
+  update orders set
+    total = v_total,
+    paid_amount = case when coalesce(p_paid, false) then v_total else null end,
+    payments = case when coalesce(p_paid, false) and p_payment_method is not null
+                    then jsonb_build_array(jsonb_build_object('method', p_payment_method, 'amount', v_total))
+                    else null end
+  where id = v_order;
+
+  return v_order;
+end$$;
+grant execute on function public.create_order(uuid, uuid, text, jsonb, boolean, text) to authenticated;
+
+-- Edita un pedido y REEMPLAZA sus ítems en una sola transacción.
+create or replace function public.update_order(
+  p_id uuid,
+  p_client_id uuid,
+  p_address_id uuid,
+  p_notes text,
+  p_items jsonb,
+  p_paid boolean,
+  p_payment_method text
+) returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  v_company uuid := current_company_id();
+  v_total   numeric := 0;
+  it        jsonb;
+  v_pid     uuid;
+  v_qty     int;
+  v_price   numeric;
+begin
+  if v_company is null then raise exception 'No autorizado'; end if;
+  if not exists (select 1 from orders o where o.id = p_id and o.company_id = v_company) then
+    raise exception 'Pedido no encontrado';
+  end if;
+  if p_client_id is null or not exists (
+    select 1 from clients c where c.id = p_client_id and c.company_id = v_company
+  ) then raise exception 'Cliente inválido'; end if;
+
+  select coalesce(sum(greatest(1, coalesce((x ->> 'quantity')::int, 1))
+                      * coalesce((x ->> 'unit_price')::numeric, 0)), 0)
+    into v_total
+  from jsonb_array_elements(coalesce(p_items, '[]'::jsonb)) x;
+
+  update orders set
+    client_id = p_client_id,
+    address_id = p_address_id,
+    notes = nullif(p_notes, ''),
+    total = v_total,
+    paid = coalesce(p_paid, false),
+    payment_method = nullif(p_payment_method, '')::payment_method,
+    paid_amount = case when coalesce(p_paid, false) then v_total else null end,
+    payments = case when coalesce(p_paid, false) and p_payment_method is not null
+                    then jsonb_build_array(jsonb_build_object('method', p_payment_method, 'amount', v_total))
+                    else null end
+  where id = p_id;
+
+  delete from order_items where order_id = p_id;
+
+  for it in select * from jsonb_array_elements(coalesce(p_items, '[]'::jsonb))
+  loop
+    v_pid := (it ->> 'product_id')::uuid;
+    v_qty := greatest(1, coalesce((it ->> 'quantity')::int, 1));
+    v_price := coalesce((it ->> 'unit_price')::numeric, 0);
+    if not exists (select 1 from products where id = v_pid and company_id = v_company) then
+      raise exception 'Producto inválido';
+    end if;
+    insert into order_items (company_id, order_id, product_id, quantity, unit_price)
+    values (v_company, p_id, v_pid, v_qty, v_price);
+  end loop;
+end$$;
+grant execute on function public.update_order(uuid, uuid, uuid, text, jsonb, boolean, text) to authenticated;
+
+-- Agrega un pedido al final de una ruta. Un advisory lock por ruta serializa los
+-- "agregar" concurrentes para que dos usuarios no obtengan la misma posición.
+create or replace function public.add_order_to_route(
+  p_route_id uuid,
+  p_order_id uuid
+) returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  v_company uuid;
+  v_driver  uuid;
+  v_pos     int;
+begin
+  select company_id, driver_id into v_company, v_driver from routes where id = p_route_id;
+  if v_company is null then raise exception 'Ruta no encontrada'; end if;
+  if v_company <> current_company_id() then raise exception 'No autorizado'; end if;
+  if current_user_role() = 'repartidor' and v_driver is distinct from auth.uid() then
+    raise exception 'No autorizado';
+  end if;
+  if not exists (select 1 from orders o where o.id = p_order_id and o.company_id = v_company) then
+    raise exception 'Pedido inválido';
+  end if;
+
+  perform pg_advisory_xact_lock(hashtext(p_route_id::text)::bigint);
+  select coalesce(max(position) + 1, 0) into v_pos from route_stops where route_id = p_route_id;
+  insert into route_stops (company_id, route_id, order_id, position)
+  values (v_company, p_route_id, p_order_id, v_pos);
+end$$;
+grant execute on function public.add_order_to_route(uuid, uuid) to authenticated;
+
+-- Guarda la carga de una ruta (reemplaza el total), la marca confirmada y, si se
+-- pasa, registra el evento en el historial — todo en una transacción.
+create or replace function public.save_route_loads(
+  p_route_id uuid,
+  p_items jsonb,
+  p_event_kind text,
+  p_event_items jsonb
+) returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  v_company uuid;
+  v_driver  uuid;
+begin
+  select company_id, driver_id into v_company, v_driver from routes where id = p_route_id;
+  if v_company is null then raise exception 'Ruta no encontrada'; end if;
+  if v_company <> current_company_id() then raise exception 'No autorizado'; end if;
+  if current_user_role() = 'repartidor' and v_driver is distinct from auth.uid() then
+    raise exception 'No autorizado';
+  end if;
+
+  delete from route_loads where route_id = p_route_id;
+
+  insert into route_loads (company_id, route_id, supply_id, quantity)
+  select v_company, p_route_id, (x ->> 'supply_id')::uuid, (x ->> 'quantity')::int
+  from jsonb_array_elements(coalesce(p_items, '[]'::jsonb)) x
+  where (x ->> 'supply_id') is not null and coalesce((x ->> 'quantity')::int, 0) > 0;
+
+  update routes set load_confirmed = true where id = p_route_id;
+
+  if p_event_kind is not null and p_event_items is not null
+     and jsonb_array_length(p_event_items) > 0 then
+    begin
+      insert into route_load_events (company_id, route_id, kind, items)
+      values (v_company, p_route_id, p_event_kind, p_event_items);
+    exception when undefined_table then null; -- el historial es opcional
+    end;
+  end if;
+end$$;
+grant execute on function public.save_route_loads(uuid, jsonb, text, jsonb) to authenticated;
+
+-- Crea un cliente con sus direcciones en una transacción. Exige al menos una
+-- dirección con texto. Devuelve {id, addressId} (primera dirección) como jsonb.
+create or replace function public.create_client(
+  p_name text,
+  p_surname text,
+  p_national_id text,
+  p_phone text,
+  p_payment_period text,
+  p_addresses jsonb
+) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare
+  v_company uuid := current_company_id();
+  v_client  uuid;
+  v_addr    uuid;
+begin
+  if v_company is null then raise exception 'No autorizado'; end if;
+  if not exists (
+    select 1 from jsonb_array_elements(coalesce(p_addresses, '[]'::jsonb)) x
+    where coalesce(trim(x ->> 'address'), '') <> ''
+  ) then raise exception 'El cliente debe tener al menos una dirección.'; end if;
+
+  insert into clients (company_id, name, surname, national_id, phone, payment_period)
+  values (v_company, p_name, p_surname, nullif(p_national_id, ''), p_phone,
+          nullif(p_payment_period, ''))
+  returning id into v_client;
+
+  with ins as (
+    insert into addresses (company_id, client_id, label, address, comuna, observation)
+    select v_company, v_client, nullif(x ->> 'label', ''), trim(x ->> 'address'),
+           nullif(trim(x ->> 'comuna'), ''), nullif(trim(x ->> 'observation'), '')
+    from jsonb_array_elements(coalesce(p_addresses, '[]'::jsonb)) x
+    where coalesce(trim(x ->> 'address'), '') <> ''
+    returning id
+  )
+  select id into v_addr from ins limit 1;
+
+  return jsonb_build_object('id', v_client, 'addressId', v_addr);
+end$$;
+grant execute on function public.create_client(text, text, text, text, text, jsonb) to authenticated;
+
+-- Edita un cliente y RECONCILIA sus direcciones en una transacción, conservando
+-- los ids de las existentes (no rompe el enlace address_id de los pedidos):
+-- actualiza las que siguen, borra las quitadas e inserta las nuevas.
+create or replace function public.update_client(
+  p_id uuid,
+  p_name text,
+  p_surname text,
+  p_national_id text,
+  p_phone text,
+  p_payment_period text,
+  p_addresses jsonb
+) returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  v_company uuid := current_company_id();
+begin
+  if v_company is null then raise exception 'No autorizado'; end if;
+
+  update clients set
+    name = p_name,
+    surname = p_surname,
+    national_id = nullif(p_national_id, ''),
+    phone = p_phone,
+    payment_period = nullif(p_payment_period, '')
+  where id = p_id and company_id = v_company;
+  if not found then raise exception 'Cliente no encontrado'; end if;
+
+  -- Actualiza las direcciones existentes (con id y texto).
+  update addresses a set
+    label = nullif(x ->> 'label', ''),
+    address = trim(x ->> 'address'),
+    comuna = nullif(trim(x ->> 'comuna'), ''),
+    observation = nullif(trim(x ->> 'observation'), '')
+  from jsonb_array_elements(coalesce(p_addresses, '[]'::jsonb)) x
+  where a.client_id = p_id
+    and (x ->> 'id') is not null and (x ->> 'id')::uuid = a.id
+    and coalesce(trim(x ->> 'address'), '') <> '';
+
+  -- Borra sólo las que el usuario quitó (existentes que ya no vienen con texto).
+  delete from addresses a
+  where a.client_id = p_id
+    and not exists (
+      select 1 from jsonb_array_elements(coalesce(p_addresses, '[]'::jsonb)) x
+      where (x ->> 'id') is not null and (x ->> 'id')::uuid = a.id
+        and coalesce(trim(x ->> 'address'), '') <> ''
+    );
+
+  -- Inserta las nuevas (sin id y con texto).
+  insert into addresses (company_id, client_id, label, address, comuna, observation)
+  select v_company, p_id, nullif(x ->> 'label', ''), trim(x ->> 'address'),
+         nullif(trim(x ->> 'comuna'), ''), nullif(trim(x ->> 'observation'), '')
+  from jsonb_array_elements(coalesce(p_addresses, '[]'::jsonb)) x
+  where (x ->> 'id') is null and coalesce(trim(x ->> 'address'), '') <> '';
+end$$;
+grant execute on function public.update_client(uuid, text, text, text, text, text, jsonb) to authenticated;

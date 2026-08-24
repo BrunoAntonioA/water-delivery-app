@@ -282,21 +282,16 @@ export async function addQuickSale(
 }
 
 /** Agrega un pedido al final de la ruta. */
+// Agrega el pedido al final de la ruta de forma ATÓMICA (función Postgres
+// add_order_to_route): un advisory lock por ruta evita que dos usuarios
+// concurrentes obtengan la misma posición.
 export async function addOrderToRoute(
   routeId: string,
   orderId: string
 ): Promise<void> {
-  // La nueva parada va al final: posición = cantidad actual de paradas.
-  const { count, error: countError } = await supabase
-    .from('route_stops')
-    .select('id', { count: 'exact', head: true })
-    .eq('route_id', routeId)
-  if (countError) throw countError
-
-  const { error } = await supabase.from('route_stops').insert({
-    route_id: routeId,
-    order_id: orderId,
-    position: count ?? 0,
+  const { error } = await supabase.rpc('add_order_to_route', {
+    p_route_id: routeId,
+    p_order_id: orderId,
   })
   if (error) throw error
 }
@@ -366,47 +361,20 @@ export async function saveRouteLoads(
   items: RouteLoadInput[],
   event?: { kind: RouteLoadKind; items: RouteLoadInput[] }
 ): Promise<void> {
-  // Reemplazo total: borramos la carga previa y volvemos a insertar.
-  const { error: delErr } = await supabase
-    .from('route_loads')
-    .delete()
-    .eq('route_id', routeId)
-  if (delErr) throw delErr
-
-  const rows = items
-    .filter((it) => it.supply_id && it.quantity > 0)
-    .map((it) => ({
-      route_id: routeId,
-      supply_id: it.supply_id,
-      quantity: it.quantity,
-    }))
-  if (rows.length > 0) {
-    const { error: insErr } = await supabase.from('route_loads').insert(rows)
-    if (insErr) throw insErr
-  }
-
-  // Marca la carga como confirmada ANTES de tocar el historial: es lo crítico
-  // para el flujo de la ruta y no debe depender de que exista la tabla nueva.
-  const { error: updErr } = await supabase
-    .from('routes')
-    .update({ load_confirmed: true })
-    .eq('id', routeId)
-  if (updErr) throw updErr
-
-  // Historial (best-effort): registra esta carga. Si la tabla aún no existe
-  // (migración no aplicada) o falla, NO se rompe el guardado de la carga.
+  // Reemplazo de carga + confirmar ruta + registrar historial, todo ATÓMICO
+  // (función Postgres save_route_loads): con usuarios concurrentes no queda la
+  // carga a medias ni la ruta sin confirmar. El historial es best-effort dentro
+  // de la función (si la tabla no existe, no rompe el guardado).
   const eventItems = (event?.items ?? []).filter(
     (it) => it.supply_id && it.quantity > 0
   )
-  if (event && eventItems.length > 0) {
-    const { error: evErr } = await supabase.from('route_load_events').insert({
-      route_id: routeId,
-      kind: event.kind,
-      items: eventItems,
-    })
-    if (evErr)
-      console.warn('No se pudo registrar el historial de carga:', evErr.message)
-  }
+  const { error } = await supabase.rpc('save_route_loads', {
+    p_route_id: routeId,
+    p_items: items,
+    p_event_kind: event?.kind ?? null,
+    p_event_items: event && eventItems.length > 0 ? eventItems : null,
+  })
+  if (error) throw error
 }
 
 export interface RouteLoadRow {

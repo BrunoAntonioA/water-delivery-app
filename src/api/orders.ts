@@ -142,94 +142,40 @@ export async function getOrder(id: string): Promise<OrderDetail> {
   return data as OrderDetail
 }
 
+// Crea el pedido + sus ítems de forma ATÓMICA (función Postgres create_order):
+// todo-o-nada, sin dejar un pedido sin ítems si algo falla a mitad.
 export async function createOrder(input: OrderInput): Promise<string> {
-  const total = input.items.reduce(
-    (sum, it) => sum + it.quantity * it.unit_price,
-    0
-  )
-
-  const paid = Boolean(input.paid)
-  const { data: order, error } = await supabase
-    .from('orders')
-    .insert({
-      client_id: input.client_id,
-      address_id: input.address_id,
-      notes: input.notes || null,
-      status: 'ordered',
-      total,
-      paid,
-      payment_method: input.payment_method ?? null,
-      paid_amount: paid ? total : null,
-      payments:
-        paid && input.payment_method
-          ? [{ method: input.payment_method, amount: total }]
-          : null,
-    })
-    .select()
-    .single()
+  const { data, error } = await supabase.rpc('create_order', {
+    p_client_id: input.client_id,
+    p_address_id: input.address_id,
+    p_notes: input.notes || null,
+    p_items: input.items,
+    p_paid: Boolean(input.paid),
+    p_payment_method: input.payment_method ?? null,
+  })
   if (error) throw error
-
-  const items = input.items.map((it) => ({
-    order_id: order.id,
-    product_id: it.product_id,
-    quantity: it.quantity,
-    unit_price: it.unit_price,
-  }))
-
-  const { error: itemsError } = await supabase
-    .from('order_items')
-    .insert(items)
-  if (itemsError) throw itemsError
-
-  return order.id as string
+  return data as string
 }
 
-/** Edita un pedido: cliente, dirección, notas y productos (reemplaza los ítems). */
+/**
+ * Edita un pedido y reemplaza sus ítems de forma ATÓMICA (función Postgres
+ * update_order): el update + el borrado/inserción de ítems ocurren en una sola
+ * transacción, así no queda un pedido sin ítems ni se pisan ediciones concurrentes.
+ */
 export async function updateOrder(
   id: string,
   input: OrderInput
 ): Promise<void> {
-  const total = input.items.reduce(
-    (sum, it) => sum + it.quantity * it.unit_price,
-    0
-  )
-
-  const paid = Boolean(input.paid)
-  const { error } = await supabase
-    .from('orders')
-    .update({
-      client_id: input.client_id,
-      address_id: input.address_id,
-      notes: input.notes || null,
-      total,
-      paid,
-      payment_method: input.payment_method ?? null,
-      paid_amount: paid ? total : null,
-      payments:
-        paid && input.payment_method
-          ? [{ method: input.payment_method, amount: total }]
-          : null,
-    })
-    .eq('id', id)
+  const { error } = await supabase.rpc('update_order', {
+    p_id: id,
+    p_client_id: input.client_id,
+    p_address_id: input.address_id,
+    p_notes: input.notes || null,
+    p_items: input.items,
+    p_paid: Boolean(input.paid),
+    p_payment_method: input.payment_method ?? null,
+  })
   if (error) throw error
-
-  // Reemplazo total de los ítems.
-  const { error: delErr } = await supabase
-    .from('order_items')
-    .delete()
-    .eq('order_id', id)
-  if (delErr) throw delErr
-
-  const items = input.items.map((it) => ({
-    order_id: id,
-    product_id: it.product_id,
-    quantity: it.quantity,
-    unit_price: it.unit_price,
-  }))
-  if (items.length > 0) {
-    const { error: insErr } = await supabase.from('order_items').insert(items)
-    if (insErr) throw insErr
-  }
 }
 
 export interface ReturnedSupply {

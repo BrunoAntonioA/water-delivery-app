@@ -44,117 +44,43 @@ export interface CreatedClient {
   addressId: string | null
 }
 
+// Crea el cliente + sus direcciones de forma ATÓMICA (función Postgres
+// create_client): si falla, no queda un cliente sin direcciones. Exige al menos
+// una dirección con texto y devuelve {id, addressId}.
 export async function createClient(input: ClientInput): Promise<CreatedClient> {
-  const { data: client, error } = await supabase
-    .from('clients')
-    .insert({
-      name: input.name,
-      surname: input.surname,
-      national_id: input.national_id || null,
-      phone: input.phone,
-      payment_period: input.payment_period,
-    })
-    .select()
-    .single()
+  const { data, error } = await supabase.rpc('create_client', {
+    p_name: input.name,
+    p_surname: input.surname,
+    p_national_id: input.national_id || null,
+    p_phone: input.phone,
+    p_payment_period: input.payment_period,
+    p_addresses: input.addresses,
+  })
   if (error) throw error
-
-  const addresses = input.addresses
-    .filter((a) => a.address.trim())
-    .map((a) => ({
-      client_id: client.id,
-      label: a.label || null,
-      address: a.address.trim(),
-      comuna: a.comuna.trim() || null,
-      observation: a.observation.trim() || null,
-    }))
-
-  // La dirección es obligatoria. Si el insert de direcciones falla (o no hay
-  // ninguna), borramos el cliente recién creado para no dejarlo huérfano —
-  // el cliente JS de Supabase no soporta transacciones multi-tabla.
-  if (addresses.length === 0) {
-    await supabase.from('clients').delete().eq('id', client.id)
-    throw new Error('El cliente debe tener al menos una dirección.')
-  }
-
-  const { data: insertedAddrs, error: addrError } = await supabase
-    .from('addresses')
-    .insert(addresses)
-    .select('id')
-  if (addrError) {
-    await supabase.from('clients').delete().eq('id', client.id)
-    throw addrError
-  }
-
-  return { id: client.id as string, addressId: insertedAddrs?.[0]?.id ?? null }
+  const res = data as { id: string; addressId: string | null }
+  return { id: res.id, addressId: res.addressId ?? null }
 }
 
+/**
+ * Edita el cliente y RECONCILIA sus direcciones de forma ATÓMICA (función
+ * Postgres update_client): conserva los ids de las direcciones existentes (no
+ * rompe el enlace address_id de los pedidos), actualiza las que siguen, borra
+ * las quitadas e inserta las nuevas — todo en una sola transacción.
+ */
 export async function updateClient(
   id: string,
   input: ClientInput
 ): Promise<void> {
-  const { error } = await supabase
-    .from('clients')
-    .update({
-      name: input.name,
-      surname: input.surname,
-      national_id: input.national_id || null,
-      phone: input.phone,
-      payment_period: input.payment_period,
-    })
-    .eq('id', id)
+  const { error } = await supabase.rpc('update_client', {
+    p_id: id,
+    p_name: input.name,
+    p_surname: input.surname,
+    p_national_id: input.national_id || null,
+    p_phone: input.phone,
+    p_payment_period: input.payment_period,
+    p_addresses: input.addresses,
+  })
   if (error) throw error
-
-  // Direcciones: se CONSERVAN los ids de las existentes para no romper el enlace
-  // con los pedidos (address_id). Se actualizan las que ya existían, se agregan
-  // las nuevas y se borran sólo las que el usuario quitó del formulario.
-  const rows = input.addresses.filter((a) => a.address.trim())
-  const existentes = rows.filter((a) => a.id)
-  const nuevas = rows.filter((a) => !a.id)
-
-  // Actualizar las existentes (mismo id).
-  for (const a of existentes) {
-    const { error: uErr } = await supabase
-      .from('addresses')
-      .update({
-        label: a.label || null,
-        address: a.address.trim(),
-        comuna: a.comuna.trim() || null,
-        observation: a.observation.trim() || null,
-      })
-      .eq('id', a.id!)
-    if (uErr) throw uErr
-  }
-
-  // Borrar sólo las direcciones que ya no están en el formulario.
-  const { data: current } = await supabase
-    .from('addresses')
-    .select('id')
-    .eq('client_id', id)
-  const keep = new Set(existentes.map((a) => a.id))
-  const toDelete = (current ?? [])
-    .map((r) => r.id as string)
-    .filter((cid) => !keep.has(cid))
-  if (toDelete.length > 0) {
-    const { error: dErr } = await supabase
-      .from('addresses')
-      .delete()
-      .in('id', toDelete)
-    if (dErr) throw dErr
-  }
-
-  // Insertar las direcciones nuevas.
-  if (nuevas.length > 0) {
-    const { error: iErr } = await supabase.from('addresses').insert(
-      nuevas.map((a) => ({
-        client_id: id,
-        label: a.label || null,
-        address: a.address.trim(),
-        comuna: a.comuna.trim() || null,
-        observation: a.observation.trim() || null,
-      }))
-    )
-    if (iErr) throw iErr
-  }
 }
 
 export async function deleteClient(id: string): Promise<void> {
