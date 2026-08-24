@@ -558,6 +558,9 @@ export async function listAssignableOrders(): Promise<OrderDetail[]> {
     .select(
       '*, client:clients(id, name, surname, phone), address:addresses(id, address, comuna, observation), items:order_items(id, product_id, quantity, unit_price, product:products(id, name))'
     )
+    // Sólo pedidos SIN entregar: un pedido entregado no debe poder re-asignarse
+    // a una ruta (además reduce los datos que se descargan).
+    .eq('status', 'ordered')
     .order('created_at', { ascending: false })
   if (error) throw error
 
