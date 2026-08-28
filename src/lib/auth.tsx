@@ -9,6 +9,7 @@ import {
 } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { supabase } from './supabase'
+import { clearPersistedCache } from './queryPersist'
 import { getCompanySubscription } from '../api/billing'
 import type { Company, Profile } from '../types/auth'
 import type { Subscription } from '../types/billing'
@@ -109,6 +110,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const newUserId = s?.user?.id
       if (newUserId !== loadedUserId.current) {
         qc.clear()
+        void clearPersistedCache() // no dejar datos de la cuenta anterior en el dispositivo
         loadedUserId.current = newUserId
       }
       setSession(s)
@@ -134,8 +136,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function signOut() {
     await supabase.auth.signOut()
-    // Vaciar el caché de datos para no dejar información del usuario que sale.
+    // Vaciar el caché de datos (memoria + persistido en el dispositivo) para no
+    // dejar información del usuario que sale.
     qc.clear()
+    await clearPersistedCache()
     loadedUserId.current = undefined
     setProfile(null)
     setCompany(null)

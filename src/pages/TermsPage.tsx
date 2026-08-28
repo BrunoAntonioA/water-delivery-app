@@ -114,11 +114,18 @@ export default function TermsPage() {
               transferencia internacional de datos.
             </p>
             <p className="mt-2">
-              Esta transferencia se realiza al amparo de garantías contractuales
-              apropiadas (cláusulas de tratamiento de datos con nuestros
-              proveedores, que a su vez aplican salvaguardas estándar), conforme
-              a la normativa chilena de protección de datos. Al usar el Servicio,
-              tomas conocimiento y aceptas esta transferencia.
+              Asimismo, para el monitoreo de errores utilizamos{' '}
+              <strong>Sentry</strong> (Functional Software, Inc.), servicio que
+              puede almacenar ciertos datos técnicos fuera de Chile (Estados
+              Unidos o Unión Europea). Sentry está configurado para minimizar la
+              recolección de datos personales.
+            </p>
+            <p className="mt-2">
+              Estas transferencias se realizan al amparo de garantías
+              contractuales apropiadas (cláusulas de tratamiento de datos con
+              nuestros proveedores, que a su vez aplican salvaguardas estándar),
+              conforme a la normativa chilena de protección de datos. Al usar el
+              Servicio, tomas conocimiento y aceptas estas transferencias.
             </p>
           </section>
 
@@ -139,6 +146,11 @@ export default function TermsPage() {
               <li>
                 <strong>Brevo</strong>: envío de correos transaccionales
                 (verificación y recuperación de cuenta).
+              </li>
+              <li>
+                <strong>Sentry</strong> (Functional Software, Inc.): monitoreo de
+                errores técnicos de la aplicación, configurado para minimizar los
+                datos personales.
               </li>
             </ul>
           </section>
