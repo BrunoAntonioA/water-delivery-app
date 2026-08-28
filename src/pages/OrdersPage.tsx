@@ -40,6 +40,7 @@ import {
   formatTimePart,
 } from '../lib/format'
 import { useIsMobile } from '../lib/useIsMobile'
+import { useOnlineStatus } from '../lib/useOnlineStatus'
 import { invalidateOrdersAndRoutes } from '../lib/queryInvalidation'
 import {
   orderClientName,
@@ -114,6 +115,7 @@ const PAID_FILTERS: { value: PaidFilter; label: string }[] = [
 export default function OrdersPage() {
   const qc = useQueryClient()
   const isMobile = useIsMobile()
+  const offline = !useOnlineStatus()
 
   const { data: clients } = useQuery({
     queryKey: ['clients'],
@@ -502,7 +504,11 @@ export default function OrdersPage() {
         title="Pedidos"
         subtitle="Crea pedidos, avanza su estado y cobra por WhatsApp."
         action={
-          <Button onClick={openNew} disabled={!products?.length}>
+          <Button
+            onClick={openNew}
+            disabled={!products?.length || offline}
+            title={offline ? 'Sin conexión: no puedes crear pedidos ahora' : undefined}
+          >
             + Nuevo pedido
           </Button>
         }
@@ -1241,12 +1247,17 @@ export default function OrdersPage() {
             >
               Cancelar
             </Button>
-            <Button type="submit" disabled={!canSave || saveMutation.isPending}>
+            <Button
+              type="submit"
+              disabled={!canSave || saveMutation.isPending || offline}
+            >
               {saveMutation.isPending
                 ? 'Guardando…'
-                : editingId
-                  ? 'Guardar cambios'
-                  : 'Crear pedido'}
+                : offline
+                  ? 'Sin conexión'
+                  : editingId
+                    ? 'Guardar cambios'
+                    : 'Crear pedido'}
             </Button>
           </div>
         </form>

@@ -6,6 +6,7 @@ import {
   type RouteLoadKind,
 } from '../api/routes'
 import type { ProductSupplyLink, RouteDetail, Supply } from '../types/db'
+import { useOnlineStatus } from '../lib/useOnlineStatus'
 import { Button, Card, EmptyState } from './ui'
 
 const KIND_LABEL: Record<RouteLoadKind, string> = {
@@ -57,6 +58,7 @@ export function RouteLoadSection({
   }, [route.loads])
 
   const qc = useQueryClient()
+  const offline = !useOnlineStatus()
   // Modo del panel: resumen, editar (fijar el total) o agregar (sumar). El
   // repartidor (addOnly) sólo puede agregar; el admin puede editar Y agregar.
   const [mode, setMode] = useState<'summary' | 'edit' | 'add'>(
@@ -207,12 +209,17 @@ export function RouteLoadSection({
                   Cancelar
                 </Button>
               )}
-              <Button type="submit" disabled={saveMutation.isPending}>
+              <Button
+                type="submit"
+                disabled={saveMutation.isPending || offline}
+              >
                 {saveMutation.isPending
                   ? 'Guardando…'
-                  : isAdd
-                    ? 'Agregar a la carga'
-                    : 'Guardar carga'}
+                  : offline
+                    ? 'Sin conexión'
+                    : isAdd
+                      ? 'Agregar a la carga'
+                      : 'Guardar carga'}
               </Button>
             </div>
           </form>

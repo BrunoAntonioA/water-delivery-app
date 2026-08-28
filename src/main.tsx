@@ -9,6 +9,7 @@ import './index.css'
 import App from './App.tsx'
 import { AuthProvider } from './lib/auth.tsx'
 import { UpdatePrompt } from './components/UpdatePrompt.tsx'
+import { OfflineBanner } from './components/OfflineBanner.tsx'
 import { queryPersister } from './lib/queryPersist.ts'
 
 // 24 h: cuánto viven las consultas en caché. Debe ser >= al maxAge de la
@@ -54,6 +55,7 @@ createRoot(document.getElementById('root')!, {
           <App />
         </AuthProvider>
       </BrowserRouter>
+      <OfflineBanner />
       <UpdatePrompt />
     </PersistQueryClientProvider>
   </StrictMode>

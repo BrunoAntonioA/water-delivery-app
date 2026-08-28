@@ -16,6 +16,7 @@ import type {
   WhatsappTemplate,
 } from '../types/db'
 import { useAuth } from '../lib/auth'
+import { useOnlineStatus } from '../lib/useOnlineStatus'
 import { formatMoney } from '../lib/format'
 import { orderClientName } from '../lib/order'
 import {
@@ -132,6 +133,9 @@ export function OrderActions({
     payMutation.isPending ||
     undeliverMutation.isPending ||
     unpayMutation.isPending
+  // Sin conexión no se puede guardar: los cambios son optimistas y quedarían
+  // "aplicados" en pantalla pero sin grabarse en el servidor.
+  const offline = !useOnlineStatus()
   const canCharge = !order.paid
   const total = order.total
 
@@ -214,15 +218,23 @@ export function OrderActions({
       <div className={className}>
         {/* Entrega (acción principal) */}
         {order.status === 'ordered' ? (
-          <Button onClick={openDeliver} disabled={busy}>
+          <Button
+            onClick={openDeliver}
+            disabled={busy || offline}
+            title={offline ? 'Sin conexión: no puedes guardar ahora' : undefined}
+          >
             <CheckIcon /> Marcar Entregado
           </Button>
         ) : (
           <Button
             variant="secondary"
             onClick={() => undeliverMutation.mutate()}
-            disabled={busy}
-            title="Deshacer entrega (volver a Pedido)"
+            disabled={busy || offline}
+            title={
+              offline
+                ? 'Sin conexión: no puedes guardar ahora'
+                : 'Deshacer entrega (volver a Pedido)'
+            }
           >
             <UndoIcon /> Deshacer entrega
           </Button>
@@ -230,14 +242,19 @@ export function OrderActions({
 
         {/* Pago (independiente de la entrega) */}
         {!order.paid ? (
-          <Button variant="success" onClick={openPay} disabled={busy}>
+          <Button
+            variant="success"
+            onClick={openPay}
+            disabled={busy || offline}
+            title={offline ? 'Sin conexión: no puedes guardar ahora' : undefined}
+          >
             <CashIcon /> Marcar Pagado
           </Button>
         ) : (
           <Button
             variant="secondary"
             onClick={() => unpayMutation.mutate()}
-            disabled={busy}
+            disabled={busy || offline}
             title="Marcar como no pagado"
           >
             <UndoIcon /> Deshacer pago
@@ -399,7 +416,9 @@ export function OrderActions({
             </Button>
             <Button
               type="submit"
-              disabled={busy || !payMethod || (alsoPaid && !paymentReady)}
+              disabled={
+                busy || offline || !payMethod || (alsoPaid && !paymentReady)
+              }
             >
               {busy
                 ? 'Guardando…'
@@ -460,7 +479,7 @@ export function OrderActions({
             <Button
               type="submit"
               variant="success"
-              disabled={!paymentReady || payMutation.isPending}
+              disabled={!paymentReady || payMutation.isPending || offline}
             >
               {payMutation.isPending ? 'Guardando…' : 'Confirmar pago'}
             </Button>
