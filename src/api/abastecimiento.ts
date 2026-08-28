@@ -66,15 +66,27 @@ export function purchaseTotal(items: PurchaseItemInput[]): number {
 }
 
 export async function listSupplyPurchases(): Promise<SupplyPurchaseDetail[]> {
-  const { data, error } = await supabase
-    .from('supply_purchases')
-    .select(
-      '*, provider:providers(*), items:supply_purchase_items(*, supply:supplies(*))'
-    )
-    .order('purchase_date', { ascending: false })
-    .order('created_at', { ascending: false })
-  if (error) throw error
-  return (data ?? []) as SupplyPurchaseDetail[]
+  // Se pagina con .range(): Supabase corta en 1000 filas y las compras crecen
+  // con el uso, así que sin esto la lista y el total quedarían cortos al pasar
+  // los 1000. Orden estable con id de desempate.
+  const PAGE = 1000
+  const all: SupplyPurchaseDetail[] = []
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from('supply_purchases')
+      .select(
+        '*, provider:providers(*), items:supply_purchase_items(*, supply:supplies(*))'
+      )
+      .order('purchase_date', { ascending: false })
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: true })
+      .range(from, from + PAGE - 1)
+    if (error) throw error
+    const batch = (data ?? []) as SupplyPurchaseDetail[]
+    all.push(...batch)
+    if (batch.length < PAGE) break
+  }
+  return all
 }
 
 export async function createSupplyPurchase(input: PurchaseInput): Promise<void> {
