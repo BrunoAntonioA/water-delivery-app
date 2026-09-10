@@ -41,6 +41,8 @@ import {
 } from '../lib/format'
 import { useIsMobile } from '../lib/useIsMobile'
 import { useOnlineStatus } from '../lib/useOnlineStatus'
+import { useOrderFilters } from '../lib/useOrderFilters'
+import { useScrollRestoration } from '../lib/useScrollRestoration'
 import { invalidateOrdersAndRoutes } from '../lib/queryInvalidation'
 import {
   orderClientName,
@@ -150,28 +152,19 @@ export default function OrdersPage() {
   const [newClientMode, setNewClientMode] = useState(false)
   const [newClient, setNewClient] = useState(emptyNewClient)
 
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
-  const [paidFilter, setPaidFilter] = useState<PaidFilter>('all')
-  const [paymentFilter, setPaymentFilter] = useState<'all' | PaymentMethod>(
-    'all'
-  )
-  const [filterClientId, setFilterClientId] = useState('')
-  // Período de cobro: 'all' = todos; 'none' = sin período; o el valor concreto.
-  const [periodFilter, setPeriodFilter] = useState<'all' | 'none' | PaymentPeriod>(
-    'all'
-  )
-  const [nameSearch, setNameSearch] = useState('')
-  const [page, setPage] = useState(1)
+  // Filtros y página guardados en la URL (sobreviven a la recarga que hace el
+  // teléfono al volver desde WhatsApp). Ver useOrderFilters.
+  const { filters, setFilters, reset: clearFilters, hasFilters } =
+    useOrderFilters()
 
   // Búsqueda con "debounce": se consulta 300 ms después de dejar de escribir,
-  // para no lanzar una petición por cada tecla.
-  const [searchQuery, setSearchQuery] = useState('')
+  // para no lanzar una petición por cada tecla. El texto en sí vive en la URL
+  // (filters.q); esto sólo retrasa el disparo de la consulta.
+  const [searchQuery, setSearchQuery] = useState(filters.q)
   useEffect(() => {
-    const id = setTimeout(() => setSearchQuery(nameSearch.trim()), 300)
+    const id = setTimeout(() => setSearchQuery(filters.q.trim()), 300)
     return () => clearTimeout(id)
-  }, [nameSearch])
+  }, [filters.q])
 
   // Marca obsoletas las vistas de pedidos Y de rutas (un pedido puede estar en
   // una ruta): así lo que cambias en Pedidos se refleja al abrir la Ruta.
@@ -184,14 +177,14 @@ export default function OrdersPage() {
     'page',
     {
       q: searchQuery,
-      client: filterClientId,
-      from: dateFrom,
-      to: dateTo,
-      status: statusFilter,
-      paid: paidFilter,
-      method: paymentFilter,
-      period: periodFilter,
-      page,
+      client: filters.clientId,
+      from: filters.from,
+      to: filters.to,
+      status: filters.status,
+      paid: filters.paid,
+      method: filters.method,
+      period: filters.period,
+      page: filters.page,
     },
   ]
 
@@ -202,56 +195,39 @@ export default function OrdersPage() {
     queryFn: () =>
       listOrdersPage({
         query: searchQuery || undefined,
-        clientId: filterClientId || undefined,
-        from: dateFrom || undefined,
-        to: dateTo || undefined,
-        status: statusFilter === 'all' ? undefined : statusFilter,
-        paid: paidFilter === 'all' ? undefined : paidFilter === 'paid',
-        method: paymentFilter === 'all' ? undefined : paymentFilter,
+        clientId: filters.clientId || undefined,
+        from: filters.from || undefined,
+        to: filters.to || undefined,
+        status: filters.status === 'all' ? undefined : filters.status,
+        paid: filters.paid === 'all' ? undefined : filters.paid === 'paid',
+        method: filters.method === 'all' ? undefined : filters.method,
         period:
-          periodFilter === 'all'
+          filters.period === 'all'
             ? undefined
-            : periodFilter === 'none'
+            : filters.period === 'none'
               ? '__none__'
-              : periodFilter,
+              : filters.period,
         limit: PAGE_SIZE,
-        offset: (page - 1) * PAGE_SIZE,
+        offset: (filters.page - 1) * PAGE_SIZE,
       }),
     placeholderData: keepPreviousData,
   })
   const pageItems = ordersPage?.rows ?? []
   const total = ordersPage?.total ?? 0
 
-  const hasFilters = Boolean(
-    dateFrom ||
-      dateTo ||
-      filterClientId ||
-      nameSearch ||
-      statusFilter !== 'all' ||
-      paidFilter !== 'all' ||
-      paymentFilter !== 'all' ||
-      periodFilter !== 'all'
-  )
-  function clearFilters() {
-    setDateFrom('')
-    setDateTo('')
-    setFilterClientId('')
-    setNameSearch('')
-    setStatusFilter('all')
-    setPaidFilter('all')
-    setPaymentFilter('all')
-    setPeriodFilter('all')
-    setPage(1)
-  }
+  // Al volver desde WhatsApp (recarga en móvil), vuelve a la misma altura de scroll
+  // una vez que la lista ya está pintada.
+  useScrollRestoration('pedidos', !isLoading && pageItems.length > 0)
 
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
-  const currentPage = Math.min(page, pageCount)
+  const currentPage = Math.min(filters.page, pageCount)
 
   // Si tras borrar/cambiar filtros la página queda vacía sin ser la primera,
   // vuelve a la primera (evita quedar en una página que ya no existe).
   useEffect(() => {
-    if (!isLoading && page > 1 && pageItems.length === 0) setPage(1)
-  }, [isLoading, page, pageItems.length])
+    if (!isLoading && filters.page > 1 && pageItems.length === 0)
+      setFilters({ page: 1 })
+  }, [isLoading, filters.page, pageItems.length, setFilters])
 
   const selectedClient = useMemo(
     () => clients?.find((c) => c.id === clientId),
@@ -301,7 +277,7 @@ export default function OrdersPage() {
       // al inicio de la vista actual (página 1, sin filtros), lo insertamos en la
       // caché al instante y NO refetcheamos la lista (misma o menos egress). El
       // resto de vistas se marca obsoleto para refrescarse al entrar.
-      if (newId && page === 1 && !hasFilters && selectedClient) {
+      if (newId && filters.page === 1 && !hasFilters && selectedClient) {
         const vItems = items.filter((it) => it.product_id && it.quantity > 0)
         const total = vItems.reduce(
           (s, it) => s + it.quantity * (productMap.get(it.product_id) ?? 0),
@@ -533,10 +509,9 @@ export default function OrdersPage() {
             <div className="mb-4">
               <Label>Buscar por nombre</Label>
               <TextInput
-                value={nameSearch}
+                value={filters.q}
                 onChange={(e) => {
-                  setNameSearch(e.target.value)
-                  setPage(1)
+                  setFilters({ q: e.target.value, page: 1 })
                 }}
                 placeholder="Nombre del cliente o de la venta rápida…"
                 className="w-full sm:max-w-sm"
@@ -547,32 +522,29 @@ export default function OrdersPage() {
                 <Label>Cliente registrado</Label>
                 <ClientCombobox
                   clients={clients ?? []}
-                  value={filterClientId}
+                  value={filters.clientId}
                   onChange={(cid) => {
-                    setFilterClientId(cid)
-                    setPage(1)
+                    setFilters({ clientId: cid, page: 1 })
                   }}
                 />
               </div>
               <DateRangeFilter
-                from={dateFrom}
-                to={dateTo}
+                from={filters.from}
+                to={filters.to}
                 onChange={(f, t) => {
-                  setDateFrom(f)
-                  setDateTo(t)
-                  setPage(1)
+                  setFilters({ from: f, to: t, page: 1 })
                 }}
                 label="Fecha de creación"
               />
               <div>
                 <Label>Período de cobro</Label>
                 <select
-                  value={periodFilter}
+                  value={filters.period}
                   onChange={(e) => {
-                    setPeriodFilter(
-                      e.target.value as 'all' | 'none' | PaymentPeriod
-                    )
-                    setPage(1)
+                    setFilters({
+                      period: e.target.value as 'all' | 'none' | PaymentPeriod,
+                      page: 1,
+                    })
                   }}
                   className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
                 >
@@ -598,11 +570,10 @@ export default function OrdersPage() {
                       key={f.value}
                       type="button"
                       onClick={() => {
-                        setStatusFilter(f.value)
-                        setPage(1)
+                        setFilters({ status: f.value, page: 1 })
                       }}
                       className={`rounded-full px-3 py-1 text-sm font-medium transition-colors ${
-                        statusFilter === f.value
+                        filters.status === f.value
                           ? 'bg-sky-600 text-white'
                           : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                       }`}
@@ -621,11 +592,10 @@ export default function OrdersPage() {
                       key={f.value}
                       type="button"
                       onClick={() => {
-                        setPaidFilter(f.value)
-                        setPage(1)
+                        setFilters({ paid: f.value, page: 1 })
                       }}
                       className={`rounded-full px-3 py-1 text-sm font-medium transition-colors ${
-                        paidFilter === f.value
+                        filters.paid === f.value
                           ? 'bg-emerald-600 text-white'
                           : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                       }`}
@@ -651,11 +621,10 @@ export default function OrdersPage() {
                       key={f.value}
                       type="button"
                       onClick={() => {
-                        setPaymentFilter(f.value)
-                        setPage(1)
+                        setFilters({ method: f.value, page: 1 })
                       }}
                       className={`rounded-full px-3 py-1 text-sm font-medium transition-colors ${
-                        paymentFilter === f.value
+                        filters.method === f.value
                           ? 'bg-emerald-600 text-white'
                           : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                       }`}
@@ -830,7 +799,7 @@ export default function OrdersPage() {
           <Pagination
             page={currentPage}
             pageCount={pageCount}
-            onPage={setPage}
+            onPage={(p) => setFilters({ page: p })}
           />
         </>
       ) : (
@@ -873,7 +842,7 @@ export default function OrdersPage() {
           <Pagination
             page={currentPage}
             pageCount={pageCount}
-            onPage={setPage}
+            onPage={(p) => setFilters({ page: p })}
           />
         </>
       )}
