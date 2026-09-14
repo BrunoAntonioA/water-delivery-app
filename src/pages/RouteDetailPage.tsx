@@ -36,7 +36,7 @@ import { listProducts } from '../api/products'
 import { listSupplies } from '../api/supplies'
 import { listClients } from '../api/clients'
 import { ClientCombobox } from '../components/ClientCombobox'
-import type { OrderDetail, RouteStopWithOrder } from '../types/db'
+import type { OrderDetail, RouteDetail, RouteStopWithOrder } from '../types/db'
 import { useAuth } from '../lib/auth'
 import { useIsMobile } from '../lib/useIsMobile'
 import {
@@ -381,8 +381,16 @@ export default function RouteDetailPage() {
     if (oldIndex < 0 || newIndex < 0) return
     const newPending = arrayMove(pending, oldIndex, newIndex)
     // Guardamos el orden completo: primero las pendientes, luego las entregadas.
-    const next = [...newPending, ...done]
+    // Renumeramos position para que coincida con el orden mostrado.
+    const next = [...newPending, ...done].map((s, i) => ({ ...s, position: i }))
     setItems(next)
+    // Optimista también en el CACHÉ de la ruta (no sólo en el estado local): así
+    // el nuevo orden se persiste en IndexedDB y sobrevive a la recarga que hace
+    // el teléfono, sin ninguna consulta extra. Si el guardado falla, onError
+    // vuelve a traer el estado real desde la BD.
+    qc.setQueryData<RouteDetail>(['route', id], (old) =>
+      old ? { ...old, stops: next } : old
+    )
     reorderMutation.mutate(next.map((s) => s.id))
   }
 
