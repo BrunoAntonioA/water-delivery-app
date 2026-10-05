@@ -3,6 +3,8 @@ import type {
   OrderPayment,
   OrderStatus,
   PaymentMethod,
+  ProductSupplyLink,
+  RouteStopWithOrder,
 } from '../types/db'
 
 type PaymentSource = {
@@ -73,6 +75,52 @@ export function returnedSuppliesText(
     return String(order.returned_bidones)
   }
   return '—'
+}
+
+/** Insumo requerido por una ruta: total y lo que falta por entregar. */
+export interface RouteSupplyNeed {
+  supply_id: string
+  total: number // insumos de TODOS los pedidos de la ruta
+  remaining: number // insumos de los pedidos aún no entregados (total − entregados)
+}
+
+/**
+ * Suma los insumos (BOM de cada producto) que necesita una ruta a partir de sus
+ * paradas. `productSupplies` mapea product_id → sus insumos (viene de la lista de
+ * productos, que ya trae el desglose). Devuelve, por insumo: el total de la ruta
+ * y el restante (solo pedidos aún NO entregados). Ignora retiros (paradas sin
+ * pedido) y productos sin desglose de insumos.
+ */
+export function routeSupplyNeeds(
+  stops: RouteStopWithOrder[],
+  productSupplies: Map<string, ProductSupplyLink[]>
+): RouteSupplyNeed[] {
+  const total = new Map<string, number>()
+  const remaining = new Map<string, number>()
+  for (const stop of stops) {
+    const order = stop.order
+    if (!order) continue
+    const pending = order.status !== 'delivered'
+    for (const item of order.items) {
+      const bom = productSupplies.get(item.product_id)
+      if (!bom) continue
+      for (const link of bom) {
+        const qty = item.quantity * link.quantity
+        total.set(link.supply_id, (total.get(link.supply_id) ?? 0) + qty)
+        if (pending) {
+          remaining.set(
+            link.supply_id,
+            (remaining.get(link.supply_id) ?? 0) + qty
+          )
+        }
+      }
+    }
+  }
+  return Array.from(total, ([supply_id, totalQty]) => ({
+    supply_id,
+    total: totalQty,
+    remaining: remaining.get(supply_id) ?? 0,
+  }))
 }
 
 /**

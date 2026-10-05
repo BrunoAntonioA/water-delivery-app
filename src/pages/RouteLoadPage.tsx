@@ -10,6 +10,7 @@ import {
   RouteLoadSection,
   soldBySupplyOf,
 } from '../components/RouteLoadSection'
+import { RouteSupplyNeeds } from '../components/RouteSupplyNeeds'
 import { Card, EmptyState, Spinner } from '../components/ui'
 
 export default function RouteLoadPage() {
@@ -44,6 +45,12 @@ export default function RouteLoadPage() {
     () => (route ? soldBySupplyOf(route, productSupply) : new Map()),
     [route, productSupply]
   )
+
+  const supplyName = useMemo(() => {
+    const m = new Map<string, string>()
+    supplies?.forEach((s) => m.set(s.id, s.name))
+    return m
+  }, [supplies])
 
   // Total de bidones devueltos por los clientes en esta ruta.
   const returnedTotal = useMemo(() => {
@@ -99,6 +106,13 @@ export default function RouteLoadPage() {
           {returnedTotal}
         </span>
       </Card>
+
+      <RouteSupplyNeeds
+        stops={route.stops}
+        productSupplies={productSupply}
+        supplyName={supplyName}
+        className="mb-4"
+      />
 
       <RouteLoadSection
         route={route}

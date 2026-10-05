@@ -367,6 +367,7 @@ export default function RouteDetailPage() {
   const pending = items.filter(isPending)
   const done = items.filter((s) => !isPending(s))
 
+
   // Al repartidor se le ocultan los pedidos hasta registrar la carga inicial.
   const loadBlocked = isRepartidor && !route?.load_confirmed
   // Ruta cerrada: el repartidor la ve en sólo lectura (sin ninguna acción). El
