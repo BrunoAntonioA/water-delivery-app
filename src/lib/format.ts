@@ -36,6 +36,13 @@ export function formatDateShort(dateStr: string): string {
   return new Intl.DateTimeFormat(LOCALE, { dateStyle: 'medium' }).format(date)
 }
 
+/** Mes y año de "YYYY-MM-DD", ej. "octubre de 2026" (sin corrimiento de zona). */
+export function formatMonthYear(dateStr: string): string {
+  const [y, m] = dateStr.split('-').map(Number)
+  const date = new Date(y, (m ?? 1) - 1, 1)
+  return new Intl.DateTimeFormat(LOCALE, { month: 'long', year: 'numeric' }).format(date)
+}
+
 /** Para fechas sin hora ("YYYY-MM-DD"), evitando corrimientos de zona horaria. */
 export function formatDateOnly(dateStr: string): string {
   const [y, m, d] = dateStr.split('-').map(Number)

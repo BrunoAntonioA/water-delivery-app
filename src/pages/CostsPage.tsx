@@ -31,7 +31,9 @@ import {
   TextArea,
   TextInput,
 } from '../components/ui'
-import { DateRangeFilter } from '../components/DateRangeFilter'
+import { PeriodFilter } from '../components/PeriodFilter'
+import { LoadingArea } from '../components/LoadingArea'
+import { isRefreshing } from '../lib/queryStatus'
 
 const PAGE_SIZE = 12
 
@@ -74,11 +76,14 @@ export default function CostsPage() {
   const [defaultRange] = useState(currentMonthRange)
   const [fromDate, setFromDate] = useState(defaultRange.from)
   const [toDate, setToDate] = useState(defaultRange.to)
-  const { data: costs, isLoading } = useQuery({
+  const costsQuery = useQuery({
     queryKey: ['costs', { from: fromDate, to: toDate }],
     queryFn: () => listCosts({ from: fromDate, to: toDate }),
     placeholderData: keepPreviousData,
   })
+  const { data: costs, isLoading } = costsQuery
+  // Mostrando datos del período anterior mientras llega el nuevo.
+  const refreshing = isRefreshing(costsQuery)
   const { data: categories } = useQuery({
     queryKey: ['cost_categories'],
     queryFn: listCostCategories,
@@ -242,7 +247,7 @@ export default function CostsPage() {
 
       {/* --- Filtros --- */}
       <Card className="mb-4 p-4">
-        <DateRangeFilter
+        <PeriodFilter
           from={fromDate}
           to={toDate}
           onChange={(f, t) => {
@@ -251,7 +256,6 @@ export default function CostsPage() {
             setPage(1)
           }}
           label="Fecha"
-          presets
         />
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <div>
@@ -303,6 +307,7 @@ export default function CostsPage() {
         )}
       </Card>
 
+      <LoadingArea loading={refreshing}>
       {/* --- Resumen --- */}
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm">
         <span className="text-slate-500">
@@ -317,7 +322,7 @@ export default function CostsPage() {
         <Spinner />
       ) : !costs || costs.length === 0 ? (
         <EmptyState>
-          Aún no tienes costos. Agrega el primero con “Nuevo costo”.
+          No hay costos en este período. Agrega uno con “Nuevo costo”.
         </EmptyState>
       ) : filtered.length === 0 ? (
         <EmptyState>No hay costos con esos filtros.</EmptyState>
@@ -397,6 +402,7 @@ export default function CostsPage() {
           />
         </>
       )}
+      </LoadingArea>
 
       {/* --- Modal crear/editar costo --- */}
       <Modal

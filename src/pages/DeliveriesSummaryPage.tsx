@@ -10,7 +10,9 @@ import { useAuth } from '../lib/auth'
 import { paidWithMethod } from '../lib/order'
 import { formatMoney } from '../lib/format'
 import { makeReportDoc, addReportTable, saveReport } from '../lib/reportPdf'
-import { DateRangeFilter } from '../components/DateRangeFilter'
+import { PeriodFilter } from '../components/PeriodFilter'
+import { LoadingArea } from '../components/LoadingArea'
+import { isRefreshing } from '../lib/queryStatus'
 import {
   Button,
   Card,
@@ -47,12 +49,7 @@ export default function DeliveriesSummaryPage() {
   // "Carga de la ruta"), no de un resumen agregado, para que ambos coincidan.
   // Con rango: sólo los pedidos de las rutas de esas fechas. Sin rango: todos
   // (incluye pedidos aún fuera de ruta, igual que antes).
-  const {
-    data: orders,
-    isLoading,
-    isError,
-    error,
-  } = useQuery({
+  const ordersQuery = useQuery({
     queryKey: hasRange
       ? ['orders', 'by-route-date', range]
       : ['orders', 'report', ALL_TIME],
@@ -61,7 +58,9 @@ export default function DeliveriesSummaryPage() {
     placeholderData: keepPreviousData,
   })
 
-  const { data: myCosts } = useQuery({
+  const { data: orders, isLoading, isError, error } = ordersQuery
+
+  const myCostsQuery = useQuery({
     queryKey: ['costs', range],
     queryFn: () => listCosts(range),
     enabled: isRepartidor,
@@ -78,12 +77,16 @@ export default function DeliveriesSummaryPage() {
   })
   // Cargas de ruta (carga inicial): columna "Carga" de los movimientos de
   // insumos. Sólo aplica a admin/operador: los repartidores no ven esa tabla.
-  const { data: routeLoads } = useQuery({
+  const routeLoadsQuery = useQuery({
     queryKey: ['route-loads', range],
     queryFn: () => listRouteLoads(range),
     enabled: !isRepartidor,
     placeholderData: keepPreviousData,
   })
+  const myCosts = myCostsQuery.data
+  const routeLoads = routeLoadsQuery.data
+  // Algún dato aún es del período anterior (o no llega): no mezclar cifras.
+  const refreshing = isRefreshing(ordersQuery, myCostsQuery, routeLoadsQuery)
 
   const inRange = (dateStr: string) =>
     (!fromDate || dateStr >= fromDate) && (!toDate || dateStr <= toDate)
@@ -326,7 +329,12 @@ export default function DeliveriesSummaryPage() {
         }
         action={
           hasData ? (
-            <Button variant="secondary" onClick={exportPdf}>
+            <Button
+              variant="secondary"
+              onClick={exportPdf}
+              disabled={refreshing}
+              title={refreshing ? 'Espera a que carguen los datos' : undefined}
+            >
               ⬇ Descargar PDF
             </Button>
           ) : undefined
@@ -354,7 +362,7 @@ export default function DeliveriesSummaryPage() {
             </div>
           )}
           <div className={isRepartidor ? 'sm:col-span-2' : undefined}>
-            <DateRangeFilter
+            <PeriodFilter
               from={fromDate}
               to={toDate}
               onChange={(f, t) => {
@@ -363,7 +371,6 @@ export default function DeliveriesSummaryPage() {
               }}
               label="Fecha de la ruta"
               hint="Se filtra por la fecha de la ruta en que se entregó el pedido (coincide con la Carga de la ruta)."
-              presets
             />
           </div>
         </div>
@@ -377,6 +384,7 @@ export default function DeliveriesSummaryPage() {
         )}
       </Card>
 
+      <LoadingArea loading={refreshing}>
       {/* Resumen personal del repartidor */}
       {isRepartidor && (
         <div className="mb-4 space-y-4">
@@ -458,6 +466,7 @@ export default function DeliveriesSummaryPage() {
           )}
         </div>
       )}
+      </LoadingArea>
     </div>
   )
 }

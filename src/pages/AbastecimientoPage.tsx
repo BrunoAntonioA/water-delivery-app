@@ -34,7 +34,9 @@ import {
   TextArea,
   TextInput,
 } from '../components/ui'
-import { DateRangeFilter } from '../components/DateRangeFilter'
+import { PeriodFilter } from '../components/PeriodFilter'
+import { LoadingArea } from '../components/LoadingArea'
+import { isRefreshing } from '../lib/queryStatus'
 import { useIsMobile } from '../lib/useIsMobile'
 
 const PAGE_SIZE = 12
@@ -88,11 +90,14 @@ export default function AbastecimientoPage() {
   const [defaultRange] = useState(currentMonthRange)
   const [fromDate, setFromDate] = useState(defaultRange.from)
   const [toDate, setToDate] = useState(defaultRange.to)
-  const { data: purchases, isLoading } = useQuery({
+  const purchasesQuery = useQuery({
     queryKey: ['supply_purchases', { from: fromDate, to: toDate }],
     queryFn: () => listSupplyPurchases({ from: fromDate, to: toDate }),
     placeholderData: keepPreviousData,
   })
+  const { data: purchases, isLoading } = purchasesQuery
+  // Mostrando datos del período anterior mientras llega el nuevo.
+  const refreshing = isRefreshing(purchasesQuery)
   const { data: providers } = useQuery({
     queryKey: ['providers'],
     queryFn: listProviders,
@@ -333,7 +338,12 @@ export default function AbastecimientoPage() {
         action={
           <div className="flex flex-wrap gap-2">
             {filtered.length > 0 && (
-              <Button variant="secondary" onClick={exportPdf}>
+              <Button
+                variant="secondary"
+                onClick={exportPdf}
+                disabled={refreshing}
+                title={refreshing ? 'Espera a que carguen los datos' : undefined}
+              >
                 ⬇ Descargar PDF
               </Button>
             )}
@@ -367,7 +377,7 @@ export default function AbastecimientoPage() {
               ))}
             </select>
           </div>
-          <DateRangeFilter
+          <PeriodFilter
             from={fromDate}
             to={toDate}
             onChange={(f, t) => {
@@ -376,7 +386,6 @@ export default function AbastecimientoPage() {
               setPage(1)
             }}
             label="Fecha"
-            presets
           />
         </div>
         {hasFilters && (
@@ -388,6 +397,7 @@ export default function AbastecimientoPage() {
         )}
       </Card>
 
+      <LoadingArea loading={refreshing}>
       {/* --- Resumen --- */}
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm">
         <span className="text-slate-500">
@@ -403,7 +413,7 @@ export default function AbastecimientoPage() {
         <Spinner />
       ) : !purchases || purchases.length === 0 ? (
         <EmptyState>
-          Aún no registras suministros. Agrega el primero con “Nuevo
+          No hay suministros en este período. Agrega uno con “Nuevo
           suministro”.
         </EmptyState>
       ) : filtered.length === 0 ? (
@@ -526,6 +536,7 @@ export default function AbastecimientoPage() {
           <Pagination page={currentPage} pageCount={pageCount} onPage={setPage} />
         </>
       )}
+      </LoadingArea>
 
       {/* --- Modal crear/editar abastecimiento --- */}
       <Modal

@@ -44,7 +44,9 @@ import {
   STATUS_LABELS,
   StatusBadge,
 } from '../components/StatusBadge'
-import { DateRangeFilter } from '../components/DateRangeFilter'
+import { PeriodFilter } from '../components/PeriodFilter'
+import { LoadingArea } from '../components/LoadingArea'
+import { isRefreshing } from '../lib/queryStatus'
 import {
   Button,
   Card,
@@ -108,12 +110,13 @@ export default function OrdersReportPage() {
   const [defaultRange] = useState(currentMonthRange)
   const [fromDate, setFromDate] = useState(defaultRange.from)
   const [toDate, setToDate] = useState(defaultRange.to)
-  const { data: orders, isLoading } = useQuery({
+  const ordersQuery = useQuery({
     queryKey: ['orders', 'report', { from: fromDate, to: toDate }],
     queryFn: () => listOrders({ from: fromDate, to: toDate }),
     enabled: tab === 'pedidos',
     placeholderData: keepPreviousData,
   })
+  const { data: orders, isLoading } = ordersQuery
   const { data: clients } = useQuery({
     queryKey: ['clients'],
     queryFn: listClients,
@@ -133,11 +136,14 @@ export default function OrdersReportPage() {
 
   // Prepagos: filas del reporte de pedidos y ingresos/devoluciones del flujo de
   // caja (tabla pequeña).
-  const { data: prepayments } = useQuery({
+  const prepaymentsQuery = useQuery({
     queryKey: ['prepayments'],
     queryFn: listPrepayments,
     enabled: tab === 'caja' || tab === 'pedidos',
   })
+  const prepayments = prepaymentsQuery.data
+  // Pestaña Pedidos: algún dato aún es del período anterior (o no llega).
+  const refreshing = isRefreshing(ordersQuery, prepaymentsQuery)
   // Cada pestaña "registra" su exportador; el botón del encabezado ejecuta el
   // de la pestaña activa, para que el botón se vea igual en todas.
   const exporterRef = useRef<null | (() => void)>(null)
@@ -353,7 +359,11 @@ export default function OrdersReportPage() {
         action={
           <Button
             variant="secondary"
-            disabled={tab === 'pedidos' ? rows.length === 0 : !childCanExport}
+            disabled={
+              tab === 'pedidos'
+                ? rows.length === 0 || refreshing
+                : !childCanExport
+            }
             onClick={() => {
               if (tab === 'pedidos') exportPdf()
               else exporterRef.current?.()
@@ -400,6 +410,7 @@ export default function OrdersReportPage() {
       {tab === 'caja' && (
         <CashFlowTab
           prepayments={prepayments ?? []}
+          prepaymentsLoading={prepaymentsQuery.isLoading}
           companyName={company?.name}
           registerExporter={registerExporter}
         />
@@ -421,7 +432,7 @@ export default function OrdersReportPage() {
               }}
             />
           </div>
-          <DateRangeFilter
+          <PeriodFilter
             from={fromDate}
             to={toDate}
             onChange={(f, t) => {
@@ -430,7 +441,6 @@ export default function OrdersReportPage() {
               setPage(1)
             }}
             label="Fecha de creación"
-            presets
           />
           <div>
             <Label>Repartidor</Label>
@@ -539,6 +549,7 @@ export default function OrdersReportPage() {
         )}
       </Card>
 
+      <LoadingArea loading={refreshing}>
       {/* --- Resumen --- */}
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm">
         <span className="text-slate-500">
@@ -696,6 +707,7 @@ export default function OrdersReportPage() {
           />
         </>
       )}
+      </LoadingArea>
         </>
       )}
     </div>
@@ -718,10 +730,12 @@ const prepaymentClientName = (p: Prepayment) =>
 // ============================================================================
 function CashFlowTab({
   prepayments,
+  prepaymentsLoading,
   companyName,
   registerExporter,
 }: {
   prepayments: Prepayment[]
+  prepaymentsLoading: boolean
   companyName?: string
   registerExporter: (fn: (() => void) | null) => void
 }) {
@@ -752,6 +766,10 @@ function CashFlowTab({
   })
   const orders = useMemo(() => ordersQuery.data ?? [], [ordersQuery.data])
   const costs = useMemo(() => costsQuery.data ?? [], [costsQuery.data])
+  // Algún dato aún es del período anterior (o no llega): ingresos y egresos
+  // se muestran juntos recién cuando TODO corresponde al período elegido.
+  const refreshing =
+    isRefreshing(ordersQuery, costsQuery, unpaidQuery) || prepaymentsLoading
 
   const income = useMemo(() => {
     let efectivo = 0
@@ -979,15 +997,17 @@ function CashFlowTab({
   const exportRef = useRef(exportPdf)
   exportRef.current = exportPdf
   useEffect(() => {
-    registerExporter(hasData ? () => exportRef.current() : null)
+    registerExporter(
+      hasData && !refreshing ? () => exportRef.current() : null
+    )
     return () => registerExporter(null)
-  }, [hasData, registerExporter])
+  }, [hasData, refreshing, registerExporter])
 
   return (
     <div>
       {/* Filtro de fechas */}
       <Card className="mb-4 p-4">
-        <DateRangeFilter
+        <PeriodFilter
           from={fromDate}
           to={toDate}
           onChange={(f, t) => {
@@ -995,20 +1015,7 @@ function CashFlowTab({
             setToDate(t)
           }}
           label="Fecha"
-          presets
         />
-        {!sameRange(range, defaultRange) && (
-          <Button
-            variant="ghost"
-            className="mt-2"
-            onClick={() => {
-              setFromDate(defaultRange.from)
-              setToDate(defaultRange.to)
-            }}
-          >
-            Volver al mes actual
-          </Button>
-        )}
 
         <label className="mt-3 flex cursor-pointer items-center gap-2 border-t border-slate-100 pt-3 text-sm text-slate-700">
           <button
@@ -1030,6 +1037,7 @@ function CashFlowTab({
         </label>
       </Card>
 
+      <LoadingArea loading={refreshing}>
       {/* KPIs */}
       <div
         className={`mb-4 grid gap-3 sm:grid-cols-2 ${
@@ -1174,6 +1182,7 @@ function CashFlowTab({
           </div>
         </Card>
       )}
+      </LoadingArea>
     </div>
   )
 }
@@ -1283,6 +1292,8 @@ function RepartidoresTab({
   })
   const orders = useMemo(() => ordersQuery.data ?? [], [ordersQuery.data])
   const costs = useMemo(() => costsQuery.data ?? [], [costsQuery.data])
+  // Algún dato aún es del período anterior (o no llega): no mezclar cifras.
+  const refreshing = Boolean(driverId) && isRefreshing(ordersQuery, costsQuery)
 
   const productSupply = useMemo(() => {
     const m = new Map<string, { supply_id: string; quantity: number }[]>()
@@ -1399,7 +1410,7 @@ function RepartidoresTab({
   // Registra el exportador para el botón del encabezado.
   const exportRef = useRef(exportPdf)
   exportRef.current = exportPdf
-  const canExport = Boolean(summary)
+  const canExport = Boolean(summary) && !refreshing
   useEffect(() => {
     registerExporter(canExport ? () => exportRef.current() : null)
     return () => registerExporter(null)
@@ -1426,7 +1437,7 @@ function RepartidoresTab({
               ))}
             </select>
           </div>
-          <DateRangeFilter
+          <PeriodFilter
             from={fromDate}
             to={toDate}
             onChange={(f, t) => {
@@ -1435,11 +1446,11 @@ function RepartidoresTab({
             }}
             label="Fecha de la ruta"
             hint="Se filtra por la fecha de la ruta en que se entregó el pedido (coincide con la Carga de la ruta y Entregas)."
-            presets
           />
         </div>
       </Card>
 
+      <LoadingArea loading={refreshing}>
       {!summary ? (
         <EmptyState>
           Selecciona un repartidor para ver sus ventas en efectivo, sus costos y
@@ -1541,6 +1552,7 @@ function RepartidoresTab({
           </div>
         </>
       )}
+      </LoadingArea>
     </div>
   )
 }
