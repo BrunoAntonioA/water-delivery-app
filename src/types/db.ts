@@ -159,6 +159,8 @@ export interface OrderItem {
   product_id: string
   quantity: number
   unit_price: number
+  // Línea que sale de un PREPAGO (vale $0, ya se pagó). null = se cobra.
+  prepayment_id?: string | null
 }
 
 // --- Tipos "enriquecidos" que devuelven las consultas con joins ---
@@ -232,4 +234,37 @@ export interface RouteDetail extends Route {
   stops: RouteStopWithOrder[]
   loads: RouteLoad[]
   driverName?: string | null
+}
+
+// --- Prepagos (el cliente paga productos por adelantado y se entregan de a poco) ---
+
+export interface PrepaymentItem {
+  id: string
+  prepayment_id: string
+  product_id: string
+  quantity: number
+  unit_price: number // precio congelado al momento de pagar
+  product: { id: string; name: string } | null
+}
+
+export interface Prepayment {
+  id: string
+  client_id: string
+  total: number // monto pagado
+  payments: OrderPayment[]
+  notes: string | null
+  paid_at: string // fecha del ingreso
+  refunded_at: string | null // fecha de la devolución (null = vigente)
+  refund_amount: number | null
+  created_at: string
+  client: { id: string; name: string; surname: string; phone: string } | null
+  items: PrepaymentItem[]
+}
+
+/** Uso del saldo por prepago y producto (función prepayment_usage). */
+export interface PrepaymentUsage {
+  prepayment_id: string
+  product_id: string
+  delivered: number
+  scheduled: number
 }

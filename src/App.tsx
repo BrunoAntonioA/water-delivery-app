@@ -28,6 +28,7 @@ import { BillingWall } from './components/BillingWall'
 import ClientsPage from './pages/ClientsPage'
 import ProductsPage from './pages/ProductsPage'
 import OrdersPage from './pages/OrdersPage'
+import PrepaymentsPage from './pages/PrepaymentsPage'
 import OrdersReportPage from './pages/OrdersReportPage'
 import DeliveriesSummaryPage from './pages/DeliveriesSummaryPage'
 import RoutesPage from './pages/RoutesPage'
@@ -327,6 +328,14 @@ export default function App() {
             element={
               <Protected module="pedidos" home={home}>
                 <OrdersPage />
+              </Protected>
+            }
+          />
+          <Route
+            path="/pedidos/prepagos"
+            element={
+              <Protected module="pedidos" home={home}>
+                <PrepaymentsPage />
               </Protected>
             }
           />

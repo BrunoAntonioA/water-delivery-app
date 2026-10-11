@@ -34,6 +34,8 @@ const TABLES = [
   'supply_purchase_items',
   'orders',
   'order_items',
+  'prepayments',
+  'prepayment_items',
   'routes',
   'route_stops',
   'route_loads',

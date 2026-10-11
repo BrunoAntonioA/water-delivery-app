@@ -45,19 +45,20 @@ function addressText(a: Address | null | undefined): string {
   return [a.address, a.comuna].filter(Boolean).join(', ')
 }
 
+/** Línea de detalle de un ítem: las que salen de un prepago no muestran $0. */
+function itemLine(it: OrderDetail['items'][number]): string {
+  const amount = it.prepayment_id
+    ? 'prepagado'
+    : formatMoney(it.quantity * it.unit_price)
+  return `• ${it.quantity} x ${it.product?.name ?? 'Producto'} — ${amount}`
+}
+
 /** Contexto de plantilla a partir de un pedido. */
 export function orderTemplateContext(
   order: OrderDetail,
   companyName?: string
 ): TemplateContext {
-  const detalle = order.items
-    .map(
-      (it) =>
-        `• ${it.quantity} x ${it.product?.name ?? 'Producto'} — ${formatMoney(
-          it.quantity * it.unit_price
-        )}`
-    )
-    .join('\n')
+  const detalle = order.items.map(itemLine).join('\n')
   return {
     cliente: order.client
       ? `${order.client.name} ${order.client.surname}`.trim()
@@ -132,13 +133,7 @@ export function buildChargeMessage(
   )
   lines.push('')
 
-  for (const item of order.items) {
-    const productName = item.product?.name ?? 'Producto'
-    const lineTotal = item.quantity * item.unit_price
-    lines.push(
-      `• ${item.quantity} x ${productName} — ${formatMoney(lineTotal)}`
-    )
-  }
+  for (const item of order.items) lines.push(itemLine(item))
 
   lines.push('')
   lines.push(`*Total a pagar: ${formatMoney(order.total)}*`)

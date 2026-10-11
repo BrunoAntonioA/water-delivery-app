@@ -1,5 +1,11 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
+import { currentMonthRange, sameRange } from '../lib/dateRange'
 import {
   createCost,
   createCostCategory,
@@ -63,9 +69,15 @@ export default function CostsPage() {
   const qc = useQueryClient()
   const { profile } = useAuth()
   const isRepartidor = profile?.role === 'repartidor'
+  // Filtros. El rango arranca en el mes actual y se filtra EN EL SERVIDOR
+  // (ahorro de egress); categoryFilter: '' = todas, '__none__' = sin categoría.
+  const [defaultRange] = useState(currentMonthRange)
+  const [fromDate, setFromDate] = useState(defaultRange.from)
+  const [toDate, setToDate] = useState(defaultRange.to)
   const { data: costs, isLoading } = useQuery({
-    queryKey: ['costs'],
-    queryFn: listCosts,
+    queryKey: ['costs', { from: fromDate, to: toDate }],
+    queryFn: () => listCosts({ from: fromDate, to: toDate }),
+    placeholderData: keepPreviousData,
   })
   const { data: categories } = useQuery({
     queryKey: ['cost_categories'],
@@ -82,9 +94,6 @@ export default function CostsPage() {
   const [inlineCatName, setInlineCatName] = useState('')
   const [page, setPage] = useState(1)
 
-  // Filtros. categoryFilter: '' = todas, '__none__' = sin categoría, o un id.
-  const [fromDate, setFromDate] = useState('')
-  const [toDate, setToDate] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('')
   // userFilter: '' = todos, o un id de usuario (sólo para admin/operador).
   const [userFilter, setUserFilter] = useState('')
@@ -199,10 +208,14 @@ export default function CostsPage() {
     currentPage * PAGE_SIZE
   )
 
-  const hasFilters = Boolean(fromDate || toDate || categoryFilter || userFilter)
+  const hasFilters = Boolean(
+    !sameRange({ from: fromDate, to: toDate }, defaultRange) ||
+      categoryFilter ||
+      userFilter
+  )
   function clearFilters() {
-    setFromDate('')
-    setToDate('')
+    setFromDate(defaultRange.from)
+    setToDate(defaultRange.to)
     setCategoryFilter('')
     setUserFilter('')
     setPage(1)
@@ -238,6 +251,7 @@ export default function CostsPage() {
             setPage(1)
           }}
           label="Fecha"
+          presets
         />
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <div>

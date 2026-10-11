@@ -1,4 +1,11 @@
 import { supabase } from '../lib/supabase'
+import {
+  ALL_TIME,
+  localDayStartISO,
+  localNextDayStartISO,
+  type DateRange,
+} from '../lib/dateRange'
+import { chunks, routeIdsInRange } from './routeRange'
 import type {
   OrderDetail,
   OrderPayment,
@@ -16,6 +23,8 @@ export interface OrderItemInput {
   product_id: string
   quantity: number
   unit_price: number
+  // Si sale de un prepago: vale $0 y descuenta del saldo (lo valida la BD).
+  prepayment_id?: string | null
 }
 
 export interface OrderInput {
@@ -32,7 +41,7 @@ export interface OrderInput {
 // traen imágenes/descripciones de producto ni datos del cliente que no se
 // muestran. Incluye la ruta (para la fecha de entrega y el repartidor).
 const ORDER_LIST_SELECT =
-  '*, client:clients(id, name, surname, phone), address:addresses(id, address, comuna, observation), items:order_items(id, product_id, quantity, unit_price, product:products(id, name)), stops:route_stops(route:routes(driver_id, route_date, driver_profile:profiles!driver_id(full_name, email)))'
+  '*, client:clients(id, name, surname, phone), address:addresses(id, address, comuna, observation), items:order_items(id, product_id, quantity, unit_price, prepayment_id, product:products(id, name)), stops:route_stops(route:routes(driver_id, route_date, driver_profile:profiles!driver_id(full_name, email)))'
 
 type Stop = {
   route: {
@@ -58,23 +67,93 @@ function mapOrderRow({ stops, ...o }: OrderRow): OrderDetail {
   }
 }
 
-/** TODOS los pedidos (para reportes/entregas, que agregan sobre el período). */
-// Trae TODOS los pedidos (para reportes y resumen de entregas, que agregan en el
-// cliente). Supabase corta en 1000 filas por consulta, así que se pagina con
-// .range() hasta traerlos todos; si no, los reportes se quedarían cortos al
-// pasar los 1000 pedidos. Se ordena también por id para una paginación estable.
-export async function listOrders(): Promise<OrderDetail[]> {
+// Columnas que usan Reportes y Entregas (ahorro de egress): sin notas, ids
+// internos ni observaciones de dirección, que esas pantallas no muestran.
+const REPORT_ORDER_FIELDS =
+  'id, client_id, customer_name, status, total, paid, payment_method, paid_amount, payments, returned_supplies, created_at, client:clients(name, surname, phone), address:addresses(address, comuna), items:order_items(id, product_id, quantity, unit_price, prepayment_id, product:products(name))'
+const REPORT_ROUTE =
+  'route:routes(driver_id, route_date, driver_profile:profiles!driver_id(full_name, email))'
+
+/**
+ * Pedidos para reportes, filtrados EN EL SERVIDOR por fecha de CREACIÓN (día
+ * local, igual que en pantalla). Sin rango ('' / '') trae todo el historial.
+ * Supabase corta en 1000 filas por consulta: se pagina con .range() (orden
+ * estable con id de desempate).
+ */
+export async function listOrders(range: DateRange = ALL_TIME): Promise<OrderDetail[]> {
+  const PAGE = 1000
+  const all: OrderDetail[] = []
+  for (let from = 0; ; from += PAGE) {
+    let q = supabase
+      .from('orders')
+      .select(`${REPORT_ORDER_FIELDS}, stops:route_stops(${REPORT_ROUTE})`)
+    if (range.from) q = q.gte('created_at', localDayStartISO(range.from))
+    if (range.to) q = q.lt('created_at', localNextDayStartISO(range.to))
+    const { data, error } = await q
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: true })
+      .range(from, from + PAGE - 1)
+    if (error) throw error
+    const batch = ((data ?? []) as unknown as OrderRow[]).map(mapOrderRow)
+    all.push(...batch)
+    if (batch.length < PAGE) break
+  }
+  return all
+}
+
+/**
+ * Pedidos de las rutas cuya FECHA DE RUTA cae en el rango (Entregas y reporte
+ * de Repartidores filtran así). Se resuelven las rutas del rango y luego sus
+ * paradas con pedido. Con rango vacío conviene usar listOrders(), que también
+ * incluye los pedidos que aún no están en una ruta.
+ */
+export async function listOrdersByRouteDate(range: DateRange): Promise<OrderDetail[]> {
+  type StopRow = {
+    order: OrderDetail | null
+    route: Stop['route'] | Stop['route'][]
+  }
+  const PAGE = 1000
+  const routeIds = await routeIdsInRange(range)
+  const all: OrderDetail[] = []
+  for (const ids of chunks(routeIds)) {
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabase
+        .from('route_stops')
+        .select(`order:orders(${REPORT_ORDER_FIELDS}), ${REPORT_ROUTE}`)
+        .in('route_id', ids)
+        .not('order_id', 'is', null)
+        .order('id', { ascending: true })
+        .range(from, from + PAGE - 1)
+      if (error) throw error
+      const batch = (data ?? []) as unknown as StopRow[]
+      for (const r of batch) {
+        if (!r.order) continue
+        const route = Array.isArray(r.route) ? r.route[0] : r.route
+        all.push(mapOrderRow({ ...r.order, stops: { route } }))
+      }
+      if (batch.length < PAGE) break
+    }
+  }
+  return all
+}
+
+/**
+ * Pedidos AÚN NO PAGADOS de todo el historial ("Por cobrar"): las deudas viejas
+ * no deben desaparecer por el rango de fechas. Son pocos y con columnas mínimas.
+ */
+export async function listUnpaidOrders(): Promise<OrderDetail[]> {
   const PAGE = 1000
   const all: OrderDetail[] = []
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await supabase
       .from('orders')
-      .select(ORDER_LIST_SELECT)
-      .order('created_at', { ascending: false })
+      .select('id, created_at, total, paid, customer_name, client:clients(name, surname)')
+      .eq('paid', false)
+      .order('created_at', { ascending: true })
       .order('id', { ascending: true })
       .range(from, from + PAGE - 1)
     if (error) throw error
-    const batch = ((data ?? []) as OrderRow[]).map(mapOrderRow)
+    const batch = (data ?? []) as unknown as OrderDetail[]
     all.push(...batch)
     if (batch.length < PAGE) break
   }
@@ -205,7 +284,8 @@ export interface ReturnedSupply {
 export async function markOrderDelivered(
   id: string,
   returnedSupplies: ReturnedSupply[],
-  paymentMethod: PaymentMethod,
+  // null = no tocar el método (pedido 100% prepagado: no hay nada que cobrar).
+  paymentMethod: PaymentMethod | null,
   payments?: OrderPayment[] | null
 ): Promise<void> {
   const totalReturned = returnedSupplies.reduce(
@@ -217,9 +297,10 @@ export async function markOrderDelivered(
     returned_supplies: returnedSupplies,
     returned_bidones: totalReturned,
     delivered_at: new Date().toISOString(),
-    // Método acordado (o principal si ya pagó con el desglose).
-    payment_method: payments?.length ? payments[0].method : paymentMethod,
   }
+  // Método acordado (o principal si ya pagó con el desglose).
+  const method = payments?.length ? payments[0].method : paymentMethod
+  if (method) patch.payment_method = method
   if (payments?.length) {
     patch.paid = true
     patch.paid_amount = paymentsTotal(payments)

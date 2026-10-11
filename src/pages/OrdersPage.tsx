@@ -4,7 +4,8 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   createOrder,
   deleteOrder,
@@ -12,8 +13,14 @@ import {
   updateOrder,
   type OrderItemInput,
 } from '../api/orders'
-import { createClient, listClients } from '../api/clients'
+import { listClients } from '../api/clients'
 import { listProducts } from '../api/products'
+import {
+  listPrepaymentUsage,
+  listPrepayments,
+  prepaymentLines,
+  type PrepaymentLine,
+} from '../api/prepayments'
 import { listSupplies } from '../api/supplies'
 import {
   addOrderToRoute,
@@ -45,13 +52,15 @@ import { useOrderFilters } from '../lib/useOrderFilters'
 import { useScrollRestoration } from '../lib/useScrollRestoration'
 import { invalidateOrdersAndRoutes } from '../lib/queryInvalidation'
 import {
+  isFullyPrepaid,
   orderClientName,
   orderPaymentList,
   returnedSuppliesText,
 } from '../lib/order'
-import { OrderItemsList } from '../components/OrderItems'
+import { OrderItemsList, PrepaidBadge } from '../components/OrderItems'
 import { NoteButton, NoteInline } from '../components/NoteButton'
 import { ClientCombobox } from '../components/ClientCombobox'
+import { QuickClientForm } from '../components/QuickClientForm'
 import { Modal } from '../components/Modal'
 import { OrderActions } from '../components/OrderActions'
 import { PaidBadge, PAYMENT_LABELS, StatusBadge } from '../components/StatusBadge'
@@ -75,18 +84,15 @@ import {
 interface DraftItem {
   product_id: string
   quantity: number
+  // Línea que sale de un prepago: vale $0 y descuenta del saldo del cliente.
+  prepayment_id?: string
 }
+
+// Clave de un saldo: prepago + producto.
+const ppKey = (prepaymentId: string, productId: string) =>
+  `${prepaymentId}|${productId}`
 
 const PAGE_SIZE = 10
-
-// ¿El texto buscado parece un teléfono? (≥6 dígitos y sólo caracteres de
-// teléfono: dígitos, +, espacios, guiones y paréntesis). Sirve para decidir si,
-// al crear un cliente nuevo, lo escrito va al campo Nombre o al campo Teléfono.
-function looksLikePhone(s: string): boolean {
-  const t = s.trim()
-  const digits = t.replace(/\D/g, '')
-  return digits.length >= 6 && /^[+\d\s()-]+$/.test(t)
-}
 
 // Fecha de hoy en formato YYYY-MM-DD (para el valor por defecto al crear ruta).
 function today(): string {
@@ -143,14 +149,18 @@ export default function OrdersPage() {
   const [addressId, setAddressId] = useState('')
   const [notes, setNotes] = useState('')
   const [items, setItems] = useState<DraftItem[]>([])
+  // Al editar: lo que este pedido YA tenía reservado de cada prepago (el saldo
+  // del servidor lo cuenta como usado, así que se suma de vuelta).
+  const [originalPrepaid, setOriginalPrepaid] = useState<Map<string, number>>(
+    () => new Map()
+  )
   // Pago al crear/editar el pedido.
   const [formPaid, setFormPaid] = useState(false)
   const [formMethod, setFormMethod] = useState<PaymentMethod | ''>('')
 
   // Registro rápido de cliente dentro del formulario de pedido.
-  const emptyNewClient = { name: '', surname: '', phone: '', address: '', comuna: '' }
-  const [newClientMode, setNewClientMode] = useState(false)
-  const [newClient, setNewClient] = useState(emptyNewClient)
+  // Lo escrito en el buscador al elegir "Registrar cliente nuevo"; null = cerrado.
+  const [newClientQuery, setNewClientQuery] = useState<string | null>(null)
 
   // Filtros y página guardados en la URL (sobreviven a la recarga que hace el
   // teléfono al volver desde WhatsApp). Ver useOrderFilters.
@@ -240,31 +250,138 @@ export default function OrdersPage() {
     return m
   }, [products])
 
+  // Las líneas de prepago valen $0: sólo se cobra lo nuevo.
   const draftTotal = useMemo(
     () =>
       items.reduce(
-        (sum, it) => sum + it.quantity * (productMap.get(it.product_id) ?? 0),
+        (sum, it) =>
+          it.prepayment_id
+            ? sum
+            : sum + it.quantity * (productMap.get(it.product_id) ?? 0),
         0
       ),
     [items, productMap]
   )
 
+  // Prepagos: se cargan sólo con el formulario abierto (ahorro de egress).
+  const { data: prepayments } = useQuery({
+    queryKey: ['prepayments'],
+    queryFn: listPrepayments,
+    enabled: modalOpen,
+  })
+  const { data: prepaymentUsage } = useQuery({
+    queryKey: ['prepayment-usage'],
+    queryFn: listPrepaymentUsage,
+    enabled: modalOpen,
+  })
+
+  // Saldo prepagado del cliente elegido, por prepago y producto. Al editar, se
+  // suma lo que este mismo pedido ya tenía reservado.
+  const clientPrepaidLines = useMemo((): PrepaymentLine[] => {
+    if (!clientId || !prepayments) return []
+    return prepayments
+      .filter((p) => p.client_id === clientId && !p.refunded_at)
+      .flatMap((p) => prepaymentLines(p, prepaymentUsage ?? []))
+      .map((l) => ({
+        ...l,
+        available:
+          l.available +
+          (originalPrepaid.get(ppKey(l.prepayment_id, l.product_id)) ?? 0),
+      }))
+      .filter((l) => l.available > 0)
+  }, [clientId, prepayments, prepaymentUsage, originalPrepaid])
+
+  const paidDateOf = useMemo(() => {
+    const m = new Map<string, string>()
+    prepayments?.forEach((p) => m.set(p.id, p.paid_at))
+    return m
+  }, [prepayments])
+
+  /** Cuánto del saldo (prepago + producto) ya usa el borrador. */
+  function draftPrepaidUsed(
+    prepaymentId: string,
+    productId: string,
+    exceptIndex = -1
+  ): number {
+    return items.reduce(
+      (s, it, i) =>
+        i !== exceptIndex &&
+        it.prepayment_id === prepaymentId &&
+        it.product_id === productId
+          ? s + it.quantity
+          : s,
+      0
+    )
+  }
+
+  function prepaidLineFor(it: DraftItem): PrepaymentLine | undefined {
+    return clientPrepaidLines.find(
+      (l) =>
+        l.prepayment_id === it.prepayment_id && l.product_id === it.product_id
+    )
+  }
+
+  /** Agrega 1 unidad del prepago al pedido (o suma a su línea si ya está). */
+  function addPrepaidItem(l: PrepaymentLine) {
+    setItems((list) => {
+      const idx = list.findIndex(
+        (it) =>
+          it.prepayment_id === l.prepayment_id && it.product_id === l.product_id
+      )
+      if (idx >= 0) {
+        return list.map((it, i) =>
+          i === idx ? { ...it, quantity: it.quantity + 1 } : it
+        )
+      }
+      // Reemplaza la fila vacía inicial, si quedó sin producto.
+      return [
+        ...list.filter((it) => it.product_id),
+        { product_id: l.product_id, quantity: 1, prepayment_id: l.prepayment_id },
+      ]
+    })
+  }
+
+  const hasPrepaidDraft = items.some((it) => it.product_id && it.prepayment_id)
+  // Todo el pedido sale de prepagos: no hay nada que cobrar.
+  const fullyPrepaidDraft =
+    hasPrepaidDraft &&
+    items.filter((it) => it.product_id).every((it) => it.prepayment_id)
+  // Alguna línea de prepago pide más de lo disponible (lo valida también la BD).
+  const prepaidOverBalance = items.some((it, i) => {
+    if (!it.prepayment_id) return false
+    const line = prepaidLineFor(it)
+    if (!line) return Boolean(prepayments) // datos cargados y ya sin saldo
+    return draftPrepaidUsed(it.prepayment_id, it.product_id, i) + it.quantity >
+      line.available
+  })
+
   const saveMutation = useMutation({
     mutationFn: async (): Promise<string | null> => {
       const payload: OrderItemInput[] = items
         .filter((it) => it.product_id && it.quantity > 0)
-        .map((it) => ({
-          product_id: it.product_id,
-          quantity: it.quantity,
-          unit_price: productMap.get(it.product_id) ?? 0,
-        }))
+        .map((it) =>
+          it.prepayment_id
+            ? {
+                product_id: it.product_id,
+                quantity: it.quantity,
+                unit_price: 0,
+                prepayment_id: it.prepayment_id,
+              }
+            : {
+                product_id: it.product_id,
+                quantity: it.quantity,
+                unit_price: productMap.get(it.product_id) ?? 0,
+              }
+        )
+      // 100% prepagado: no se registra pago (la BD lo deja pagado sola).
+      const payNow = formPaid && !fullyPrepaidDraft
       const input = {
         client_id: clientId,
         address_id: addressId || null,
         notes,
         items: payload,
-        paid: formPaid,
-        payment_method: formPaid ? (formMethod as PaymentMethod) : null,
+        paid: payNow,
+        payment_method: payNow ? (formMethod as PaymentMethod) : null,
       }
       if (editingId) {
         await updateOrder(editingId, input)
@@ -279,22 +396,23 @@ export default function OrdersPage() {
       // resto de vistas se marca obsoleto para refrescarse al entrar.
       if (newId && filters.page === 1 && !hasFilters && selectedClient) {
         const vItems = items.filter((it) => it.product_id && it.quantity > 0)
-        const total = vItems.reduce(
-          (s, it) => s + it.quantity * (productMap.get(it.product_id) ?? 0),
-          0
-        )
+        const unitPrice = (it: DraftItem) =>
+          it.prepayment_id ? 0 : productMap.get(it.product_id) ?? 0
+        const total = vItems.reduce((s, it) => s + it.quantity * unitPrice(it), 0)
+        const payNow = formPaid && !fullyPrepaidDraft
+        const paid = payNow || fullyPrepaidDraft
         const optimistic: OrderDetail = {
           id: newId,
           client_id: clientId,
           customer_name: null,
           address_id: addressId || null,
           status: 'ordered',
-          paid: formPaid,
+          paid,
           total,
-          payment_method: formPaid ? (formMethod as PaymentMethod) : null,
-          paid_amount: formPaid ? total : null,
+          payment_method: payNow ? (formMethod as PaymentMethod) : null,
+          paid_amount: paid ? total : null,
           payments:
-            formPaid && formMethod
+            payNow && formMethod
               ? [{ method: formMethod as PaymentMethod, amount: total }]
               : null,
           returned_bidones: null,
@@ -310,7 +428,8 @@ export default function OrdersPage() {
             order_id: newId,
             product_id: it.product_id,
             quantity: it.quantity,
-            unit_price: productMap.get(it.product_id) ?? 0,
+            unit_price: unitPrice(it),
+            prepayment_id: it.prepayment_id ?? null,
             product: products?.find((p) => p.id === it.product_id) ?? null,
           })),
           driverId: null,
@@ -328,11 +447,15 @@ export default function OrdersPage() {
         // Marca obsoletas las demás vistas SIN re-pedir la lista activa.
         qc.invalidateQueries({ queryKey: ['orders'], refetchType: 'none' })
         qc.invalidateQueries({ queryKey: ['assignable-orders'] })
+        qc.invalidateQueries({ queryKey: ['prepayment-usage'] })
       } else {
         invalidate()
       }
-      setModalOpen(false)
       setEditingId(null)
+      // Creado: se queda en Pedidos (aunque se haya abierto desde Prepagos),
+      // para ver el pedido recién creado en la lista.
+      setReturnToPrepayments(false)
+      setModalOpen(false)
     },
   })
 
@@ -393,49 +516,16 @@ export default function OrdersPage() {
     },
   })
 
-  const createClientMutation = useMutation({
-    mutationFn: () =>
-      createClient({
-        name: newClient.name.trim(),
-        surname: newClient.surname.trim(),
-        national_id: '',
-        phone: newClient.phone.trim(),
-        payment_period: null,
-        addresses: [
-          {
-            label: 'Casa',
-            address: newClient.address.trim(),
-            comuna: newClient.comuna.trim(),
-            observation: '',
-          },
-        ],
-      }),
-    onSuccess: ({ id, addressId: newAddressId }) => {
-      qc.invalidateQueries({ queryKey: ['clients'] })
-      setClientId(id)
-      setAddressId(newAddressId ?? '')
-      setNewClientMode(false)
-      setNewClient(emptyNewClient)
-    },
-  })
-
-  const canSaveNewClient = Boolean(
-    newClient.name.trim() &&
-      newClient.phone.trim() &&
-      newClient.address.trim() &&
-      newClient.comuna.trim()
-  )
-
   function openNew() {
     setEditingId(null)
     setClientId('')
     setAddressId('')
     setNotes('')
     setItems([{ product_id: '', quantity: 1 }])
+    setOriginalPrepaid(new Map())
     setFormPaid(false)
     setFormMethod('')
-    setNewClientMode(false)
-    setNewClient(emptyNewClient)
+    setNewClientQuery(null)
     setModalOpen(true)
   }
 
@@ -449,13 +539,21 @@ export default function OrdersPage() {
         ? o.items.map((it) => ({
             product_id: it.product_id,
             quantity: it.quantity,
+            ...(it.prepayment_id ? { prepayment_id: it.prepayment_id } : {}),
           }))
         : [{ product_id: '', quantity: 1 }]
     )
-    setFormPaid(o.paid)
+    const reserved = new Map<string, number>()
+    for (const it of o.items) {
+      if (!it.prepayment_id) continue
+      const k = ppKey(it.prepayment_id, it.product_id)
+      reserved.set(k, (reserved.get(k) ?? 0) + it.quantity)
+    }
+    setOriginalPrepaid(reserved)
+    // Un pedido 100% prepagado queda "pagado" solo: no es un pago a registrar.
+    setFormPaid(o.paid && !isFullyPrepaid(o))
     setFormMethod(o.payment_method ?? '')
-    setNewClientMode(false)
-    setNewClient(emptyNewClient)
+    setNewClientQuery(null)
     setModalOpen(true)
   }
 
@@ -463,6 +561,17 @@ export default function OrdersPage() {
   // registrado (las ventas rápidas se manejan desde la ruta).
   const canEditOrder = (o: OrderDetail) =>
     o.status === 'ordered' && Boolean(o.client_id)
+
+  /** Elige el cliente del pedido (existente o recién creado). */
+  function selectClient(id: string, newAddressId = '') {
+    setClientId(id)
+    setAddressId(newAddressId)
+    // Las líneas de prepago son del cliente anterior.
+    setItems((l) => {
+      const kept = l.filter((it) => !it.prepayment_id)
+      return kept.length ? kept : [{ product_id: '', quantity: 1 }]
+    })
+  }
 
   function updateItem(i: number, patch: Partial<DraftItem>) {
     setItems((list) =>
@@ -472,7 +581,46 @@ export default function OrdersPage() {
 
   const validItems = items.filter((it) => it.product_id && it.quantity > 0)
   const canSave =
-    clientId && validItems.length > 0 && (!formPaid || formMethod)
+    clientId &&
+    validItems.length > 0 &&
+    !prepaidOverBalance &&
+    (fullyPrepaidDraft || !formPaid || formMethod)
+
+  // Desde Prepagos → "Crear entrega": se abre el formulario con el cliente ya
+  // elegido (su prepago aparece solo). Al crear se queda en Pedidos; al
+  // cancelar vuelve a Prepagos.
+  const location = useLocation()
+  const navigate = useNavigate()
+  const [returnToPrepayments, setReturnToPrepayments] = useState(false)
+  const prefillAddress = useRef(false)
+  useEffect(() => {
+    const cid = (location.state as { prepaidOrderClientId?: string } | null)
+      ?.prepaidOrderClientId
+    if (!cid) return
+    openNew()
+    setClientId(cid)
+    setReturnToPrepayments(true)
+    prefillAddress.current = true
+    // Limpia el estado para que no se reabra al recargar o volver atrás.
+    navigate(location.pathname + location.search, { replace: true, state: null })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state])
+  // Si el cliente tiene una sola dirección, se deja elegida (una vez).
+  useEffect(() => {
+    if (!prefillAddress.current || !selectedClient) return
+    prefillAddress.current = false
+    if (selectedClient.addresses.length === 1) {
+      setAddressId(selectedClient.addresses[0].id)
+    }
+  }, [selectedClient])
+
+  function closeForm() {
+    setModalOpen(false)
+    if (returnToPrepayments) {
+      setReturnToPrepayments(false)
+      navigate('/pedidos/prepagos')
+    }
+  }
 
   return (
     <div>
@@ -480,13 +628,18 @@ export default function OrdersPage() {
         title="Pedidos"
         subtitle="Crea pedidos, avanza su estado y cobra por WhatsApp."
         action={
-          <Button
-            onClick={openNew}
-            disabled={!products?.length || offline}
-            title={offline ? 'Sin conexión: no puedes crear pedidos ahora' : undefined}
-          >
-            + Nuevo pedido
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Link to="/pedidos/prepagos">
+              <Button variant="secondary">💳 Prepagos</Button>
+            </Link>
+            <Button
+              onClick={openNew}
+              disabled={!products?.length || offline}
+              title={offline ? 'Sin conexión: no puedes crear pedidos ahora' : undefined}
+            >
+              + Nuevo pedido
+            </Button>
+          </div>
         }
       />
 
@@ -687,9 +840,13 @@ export default function OrdersPage() {
                     )}
                     <ul className="mt-2 space-y-0.5 text-sm text-slate-600">
                       {o.items.map((it) => (
-                        <li key={it.id}>
-                          {it.quantity} × {it.product?.name ?? 'Producto'} —{' '}
-                          {formatMoney(it.quantity * it.unit_price)}
+                        <li key={it.id} className="flex items-center gap-1.5">
+                          <span>
+                            {it.quantity} × {it.product?.name ?? 'Producto'}
+                            {!it.prepayment_id &&
+                              ` — ${formatMoney(it.quantity * it.unit_price)}`}
+                          </span>
+                          {it.prepayment_id && <PrepaidBadge />}
                         </li>
                       ))}
                     </ul>
@@ -925,7 +1082,7 @@ export default function OrdersPage() {
 
       <Modal
         open={modalOpen}
-        onClose={() => setModalOpen(false)}
+        onClose={closeForm}
         title={editingId ? 'Editar pedido' : 'Nuevo pedido'}
         wide
       >
@@ -936,90 +1093,15 @@ export default function OrdersPage() {
           }}
           className="space-y-4"
         >
-          {newClientMode ? (
-            <div className="space-y-3 rounded-xl border border-sky-200 bg-sky-50/60 p-4">
-              <p className="font-medium text-slate-800">
-                Registrar cliente nuevo
-              </p>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
-                  <Label>Nombre *</Label>
-                  <TextInput
-                    value={newClient.name}
-                    onChange={(e) =>
-                      setNewClient({ ...newClient, name: e.target.value })
-                    }
-                    placeholder="Nombre"
-                    autoFocus
-                  />
-                </div>
-                <div>
-                  <Label>Apellido</Label>
-                  <TextInput
-                    value={newClient.surname}
-                    onChange={(e) =>
-                      setNewClient({ ...newClient, surname: e.target.value })
-                    }
-                    placeholder="Apellido"
-                  />
-                </div>
-              </div>
-              <div>
-                <Label>Teléfono *</Label>
-                <TextInput
-                  value={newClient.phone}
-                  onChange={(e) =>
-                    setNewClient({ ...newClient, phone: e.target.value })
-                  }
-                  placeholder="+56912345678"
-                />
-              </div>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
-                  <Label>Dirección *</Label>
-                  <TextInput
-                    value={newClient.address}
-                    onChange={(e) =>
-                      setNewClient({ ...newClient, address: e.target.value })
-                    }
-                    placeholder="Dirección"
-                  />
-                </div>
-                <div>
-                  <Label>Comuna *</Label>
-                  <TextInput
-                    value={newClient.comuna}
-                    onChange={(e) =>
-                      setNewClient({ ...newClient, comuna: e.target.value })
-                    }
-                    placeholder="Comuna"
-                  />
-                </div>
-              </div>
-              {createClientMutation.isError && (
-                <p className="text-sm text-red-600">
-                  Error: {(createClientMutation.error as Error).message}
-                </p>
-              )}
-              <div className="flex gap-2">
-                <Button
-                  type="button"
-                  onClick={() => createClientMutation.mutate()}
-                  disabled={!canSaveNewClient || createClientMutation.isPending}
-                >
-                  {createClientMutation.isPending
-                    ? 'Guardando…'
-                    : 'Guardar y usar'}
-                </Button>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => setNewClientMode(false)}
-                >
-                  Cancelar
-                </Button>
-              </div>
-            </div>
+          {newClientQuery !== null ? (
+            <QuickClientForm
+              initialQuery={newClientQuery}
+              onCreated={({ id, addressId: newAddressId }) => {
+                selectClient(id, newAddressId ?? '')
+                setNewClientQuery(null)
+              }}
+              onCancel={() => setNewClientQuery(null)}
+            />
           ) : (
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
@@ -1027,21 +1109,8 @@ export default function OrdersPage() {
                 <ClientCombobox
                   clients={clients ?? []}
                   value={clientId}
-                  onChange={(id) => {
-                    setClientId(id)
-                    setAddressId('')
-                  }}
-                  onCreateNew={(q) => {
-                    // Si lo escrito parece un teléfono, va al campo Teléfono;
-                    // si no, al campo Nombre.
-                    const isPhone = looksLikePhone(q)
-                    setNewClient({
-                      ...emptyNewClient,
-                      name: isPhone ? '' : q,
-                      phone: isPhone ? q : '',
-                    })
-                    setNewClientMode(true)
-                  }}
+                  onChange={(id) => selectClient(id)}
+                  onCreateNew={(q) => setNewClientQuery(q)}
                 />
               </div>
               <div>
@@ -1082,28 +1151,86 @@ export default function OrdersPage() {
                 + Agregar producto
               </button>
             </div>
+            {/* Saldo prepagado del cliente: se agrega al pedido sin cobrarse. */}
+            {clientPrepaidLines.length > 0 && (
+              <div className="mb-3 rounded-xl border border-violet-200 bg-violet-50/60 p-3">
+                <p className="mb-2 text-sm font-medium text-violet-900">
+                  💳 Prepago disponible
+                </p>
+                <div className="space-y-1.5">
+                  {clientPrepaidLines.map((l) => {
+                    const left =
+                      l.available - draftPrepaidUsed(l.prepayment_id, l.product_id)
+                    const paidAt = paidDateOf.get(l.prepayment_id)
+                    return (
+                      <div
+                        key={ppKey(l.prepayment_id, l.product_id)}
+                        className="flex items-center justify-between gap-3 text-sm"
+                      >
+                        <span className="min-w-0 text-slate-700">
+                          <span className="font-medium">{l.productName}</span>{' '}
+                          <span className="text-slate-500">
+                            · quedan {left}
+                            {paidAt ? ` · pagado ${formatDatePart(paidAt)}` : ''}
+                          </span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => addPrepaidItem(l)}
+                          disabled={left <= 0}
+                          className="shrink-0 rounded-lg border border-violet-300 bg-white px-2.5 py-1 text-sm font-medium text-violet-700 hover:bg-violet-100 disabled:opacity-40"
+                        >
+                          + Agregar
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
             <div className="space-y-2">
               {items.map((it, i) => {
-                const price = productMap.get(it.product_id) ?? 0
+                const price = it.prepayment_id
+                  ? 0
+                  : productMap.get(it.product_id) ?? 0
+                const line = it.prepayment_id ? prepaidLineFor(it) : undefined
+                // Máximo de esta línea de prepago: lo disponible menos lo que
+                // usan otras líneas del borrador del mismo prepago y producto.
+                const maxQty =
+                  it.prepayment_id && line
+                    ? line.available -
+                      draftPrepaidUsed(it.prepayment_id, it.product_id, i)
+                    : Infinity
                 return (
                   <div
                     key={i}
                     className="flex flex-col gap-2.5 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-center sm:gap-3 sm:rounded-none sm:border-0 sm:bg-transparent sm:p-0"
                   >
-                    <select
-                      value={it.product_id}
-                      onChange={(e) =>
-                        updateItem(i, { product_id: e.target.value })
-                      }
-                      className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
-                    >
-                      <option value="">Producto…</option>
-                      {products?.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name} ({formatMoney(p.price)})
-                        </option>
-                      ))}
-                    </select>
+                    {it.prepayment_id ? (
+                      // Producto fijo: sale del prepago (no se puede cambiar).
+                      <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-sm">
+                        <span className="truncate text-slate-800">
+                          {products?.find((p) => p.id === it.product_id)
+                            ?.name ?? 'Producto'}
+                        </span>
+                        <PrepaidBadge />
+                      </div>
+                    ) : (
+                      <select
+                        value={it.product_id}
+                        onChange={(e) =>
+                          updateItem(i, { product_id: e.target.value })
+                        }
+                        className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                      >
+                        <option value="">Producto…</option>
+                        {products?.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name} ({formatMoney(p.price)})
+                          </option>
+                        ))}
+                      </select>
+                    )}
 
                     <div className="flex items-center justify-between gap-3 sm:justify-end">
                       <label className="flex items-center gap-2">
@@ -1115,7 +1242,9 @@ export default function OrdersPage() {
                             min={1}
                             value={it.quantity}
                             onValueChange={(n) =>
-                              updateItem(i, { quantity: n })
+                              updateItem(i, {
+                                quantity: Math.max(1, Math.min(n, maxQty)),
+                              })
                             }
                             className="bg-white text-center"
                           />
@@ -1123,7 +1252,11 @@ export default function OrdersPage() {
                       </label>
                       <div className="flex items-center gap-1">
                         <span className="text-base font-semibold text-slate-800 sm:w-24 sm:text-right sm:text-sm sm:font-medium">
-                          {formatMoney(price * it.quantity)}
+                          {it.prepayment_id ? (
+                            <span className="text-violet-700">Prepagado</span>
+                          ) : (
+                            formatMoney(price * it.quantity)
+                          )}
                         </span>
                         {items.length > 1 && (
                           <button
@@ -1155,6 +1288,26 @@ export default function OrdersPage() {
           </div>
 
           {/* Pago al crear el pedido (puede pagarse sin haber sido entregado). */}
+          {fullyPrepaidDraft ? (
+            // Todo sale del prepago: ya está pagado y no se puede cambiar.
+            <div className="rounded-lg border border-violet-200 bg-violet-50/60 p-3">
+              <label className="flex cursor-not-allowed items-center gap-3">
+                <input
+                  type="checkbox"
+                  checked
+                  disabled
+                  readOnly
+                  className="h-4 w-4 rounded border-slate-300 text-violet-600"
+                />
+                <span className="text-sm font-medium text-slate-700">
+                  Ya está pagado
+                </span>
+              </label>
+              <p className="mt-1 pl-7 text-xs text-violet-800">
+                Todo sale del prepago: no se cobra.
+              </p>
+            </div>
+          ) : (
           <div className="rounded-lg border border-slate-200 p-3">
             <label className="flex cursor-pointer items-center gap-3">
               <input
@@ -1167,7 +1320,9 @@ export default function OrdersPage() {
                 className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
               />
               <span className="text-sm font-medium text-slate-700">
-                Ya está pagado
+                {hasPrepaidDraft
+                  ? 'Ya pagó lo nuevo (lo prepagado no se cobra)'
+                  : 'Ya está pagado'}
               </span>
             </label>
             {formPaid && (
@@ -1194,9 +1349,18 @@ export default function OrdersPage() {
               </div>
             )}
           </div>
+          )}
+
+          {prepaidOverBalance && (
+            <p className="text-sm text-red-600">
+              Una línea de prepago supera el saldo disponible del cliente.
+            </p>
+          )}
 
           <div className="flex items-center justify-between border-t border-slate-100 pt-3">
-            <span className="text-sm text-slate-500">Total del pedido</span>
+            <span className="text-sm text-slate-500">
+              {hasPrepaidDraft ? 'Total a cobrar' : 'Total del pedido'}
+            </span>
             <span className="text-xl font-bold text-slate-900">
               {formatMoney(draftTotal)}
             </span>
@@ -1209,11 +1373,7 @@ export default function OrdersPage() {
           )}
 
           <div className="sticky bottom-0 -mx-5 -mb-4 mt-2 flex flex-wrap justify-end gap-2 border-t border-slate-100 bg-white px-5 py-3">
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => setModalOpen(false)}
-            >
+            <Button type="button" variant="secondary" onClick={closeForm}>
               Cancelar
             </Button>
             <Button

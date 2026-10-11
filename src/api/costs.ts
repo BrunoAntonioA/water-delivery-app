@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase'
+import { ALL_TIME, type DateRange } from '../lib/dateRange'
 import type { Cost, CostCategory, CostWithCategory } from '../types/db'
 
 // --- Categorías de costo ---
@@ -40,18 +41,26 @@ export interface CostInput {
 
 type CreatorProfile = { full_name: string | null; email: string | null } | null
 
-export async function listCosts(): Promise<CostWithCategory[]> {
+/**
+ * Costos, filtrados EN EL SERVIDOR por fecha de emisión ('' = sin límite).
+ */
+export async function listCosts(
+  range: DateRange = ALL_TIME
+): Promise<CostWithCategory[]> {
   // Se pagina con .range(): Supabase corta en 1000 filas y los costos crecen a
   // diario, así que sin esto la lista (y los totales que se calculan sobre ella)
   // quedarían cortos al pasar los 1000. Orden estable con id de desempate.
   const PAGE = 1000
   const all: CostWithCategory[] = []
   for (let from = 0; ; from += PAGE) {
-    const { data, error } = await supabase
+    let q = supabase
       .from('costs')
       .select(
         '*, category:cost_categories(*), creator:profiles!created_by(full_name, email)'
       )
+    if (range.from) q = q.gte('issue_date', range.from)
+    if (range.to) q = q.lte('issue_date', range.to)
+    const { data, error } = await q
       .order('issue_date', { ascending: false })
       .order('created_at', { ascending: false })
       .order('id', { ascending: true })

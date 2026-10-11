@@ -1,7 +1,8 @@
-import { useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import { driverLabel, listDrivers, listRouteLoads } from '../api/routes'
-import { listOrders } from '../api/orders'
+import { listOrders, listOrdersByRouteDate } from '../api/orders'
+import { ALL_TIME, currentMonthRange, sameRange } from '../lib/dateRange'
 import { listCosts } from '../api/costs'
 import { listProducts } from '../api/products'
 import { listSupplies } from '../api/supplies'
@@ -25,8 +26,13 @@ export default function DeliveriesSummaryPage() {
   const isRepartidor = profile?.role === 'repartidor'
 
   const [driverId, setDriverId] = useState('')
-  const [fromDate, setFromDate] = useState('')
-  const [toDate, setToDate] = useState('')
+  // Rango de FECHA DE RUTA: arranca en el mes actual y se filtra EN EL SERVIDOR
+  // (ahorro de egress). "Todo" vuelve a traer el historial completo.
+  const [defaultRange] = useState(currentMonthRange)
+  const [fromDate, setFromDate] = useState(defaultRange.from)
+  const [toDate, setToDate] = useState(defaultRange.to)
+  const range = { from: fromDate, to: toDate }
+  const hasRange = Boolean(fromDate || toDate)
 
   // El repartidor sólo ve lo suyo: nunca enviamos filtro de repartidor.
   const effectiveDriverId = isRepartidor ? null : driverId || null
@@ -39,20 +45,27 @@ export default function DeliveriesSummaryPage() {
 
   // Se cuenta a partir de los pedidos entregados y sus ítems (igual que la
   // "Carga de la ruta"), no de un resumen agregado, para que ambos coincidan.
+  // Con rango: sólo los pedidos de las rutas de esas fechas. Sin rango: todos
+  // (incluye pedidos aún fuera de ruta, igual que antes).
   const {
     data: orders,
     isLoading,
     isError,
     error,
   } = useQuery({
-    queryKey: ['orders'],
-    queryFn: listOrders,
+    queryKey: hasRange
+      ? ['orders', 'by-route-date', range]
+      : ['orders', 'report', ALL_TIME],
+    queryFn: () =>
+      hasRange ? listOrdersByRouteDate(range) : listOrders(ALL_TIME),
+    placeholderData: keepPreviousData,
   })
 
   const { data: myCosts } = useQuery({
-    queryKey: ['costs'],
-    queryFn: listCosts,
+    queryKey: ['costs', range],
+    queryFn: () => listCosts(range),
     enabled: isRepartidor,
+    placeholderData: keepPreviousData,
   })
   // Productos e insumos: necesarios para la tabla de insumos, que ven todos.
   const { data: products } = useQuery({
@@ -66,9 +79,10 @@ export default function DeliveriesSummaryPage() {
   // Cargas de ruta (carga inicial): columna "Carga" de los movimientos de
   // insumos. Sólo aplica a admin/operador: los repartidores no ven esa tabla.
   const { data: routeLoads } = useQuery({
-    queryKey: ['route-loads'],
-    queryFn: listRouteLoads,
+    queryKey: ['route-loads', range],
+    queryFn: () => listRouteLoads(range),
     enabled: !isRepartidor,
+    placeholderData: keepPreviousData,
   })
 
   const inRange = (dateStr: string) =>
@@ -239,12 +253,12 @@ export default function DeliveriesSummaryPage() {
         'Sin nombre'
       : 'Todos los repartidores'
 
-  const hasFilters = Boolean(driverId || fromDate || toDate)
+  const hasFilters = Boolean(driverId || !sameRange(range, defaultRange))
 
   function clearAll() {
     setDriverId('')
-    setFromDate('')
-    setToDate('')
+    setFromDate(defaultRange.from)
+    setToDate(defaultRange.to)
   }
 
   // Los movimientos de insumos son sólo para admin/operador.
@@ -349,6 +363,7 @@ export default function DeliveriesSummaryPage() {
               }}
               label="Fecha de la ruta"
               hint="Se filtra por la fecha de la ruta en que se entregó el pedido (coincide con la Carga de la ruta)."
+              presets
             />
           </div>
         </div>

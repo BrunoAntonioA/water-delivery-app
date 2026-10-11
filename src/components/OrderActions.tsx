@@ -18,7 +18,7 @@ import type {
 import { useAuth } from '../lib/auth'
 import { useOnlineStatus } from '../lib/useOnlineStatus'
 import { formatMoney } from '../lib/format'
-import { orderClientName } from '../lib/order'
+import { isFullyPrepaid, orderClientName } from '../lib/order'
 import {
   buildChargeMessage,
   orderTemplateContext,
@@ -89,7 +89,7 @@ export function OrderActions({
       payments,
     }: {
       returnedSupplies: ReturnedSupply[]
-      method: PaymentMethod
+      method: PaymentMethod | null
       payments?: OrderPayment[] | null
     }) => markOrderDelivered(order.id, returnedSupplies, method, payments),
     // Optimista: el pedido se ve "Entregado" (y pagado si corresponde) al toque.
@@ -138,6 +138,8 @@ export function OrderActions({
   const offline = !useOnlineStatus()
   const canCharge = !order.paid
   const total = order.total
+  // Todo sale de un prepago: no hay nada que cobrar ni método que registrar.
+  const prepaidOnly = isFullyPrepaid(order)
 
   // Pago dividido: dos métodos distintos, montos > 0 y suma igual al total.
   const splitSum = round2((Number(payAmount) || 0) + (Number(payAmount2) || 0))
@@ -241,7 +243,14 @@ export function OrderActions({
         )}
 
         {/* Pago (independiente de la entrega) */}
-        {!order.paid ? (
+        {prepaidOnly ? (
+          <span
+            className="inline-flex items-center justify-center rounded-lg bg-violet-50 px-3.5 py-2 text-sm font-medium text-violet-700"
+            title="Este pedido sale completo de un prepago: ya está pagado"
+          >
+            Prepagado
+          </span>
+        ) : !order.paid ? (
           <Button
             variant="success"
             onClick={openPay}
@@ -284,6 +293,10 @@ export function OrderActions({
         <form
           onSubmit={(e) => {
             e.preventDefault()
+            if (prepaidOnly) {
+              deliverMutation.mutate({ returnedSupplies, method: null })
+              return
+            }
             if (!payMethod) return
             if (alsoPaid) {
               if (!paymentReady) return
@@ -358,33 +371,41 @@ export function OrderActions({
             )}
           </div>
 
-          <MethodSelector
-            method={payMethod}
-            setMethod={setPayMethod}
-            label={splitPay ? 'Método del pago 1 *' : 'Método de pago *'}
-          />
+          {prepaidOnly ? (
+            <p className="rounded-lg bg-violet-50 px-4 py-3 text-sm text-violet-800">
+              Pedido prepagado: no hay nada que cobrar.
+            </p>
+          ) : (
+            <>
+              <MethodSelector
+                method={payMethod}
+                setMethod={setPayMethod}
+                label={splitPay ? 'Método del pago 1 *' : 'Método de pago *'}
+              />
 
-          <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-200 px-4 py-3">
-            <input
-              type="checkbox"
-              checked={alsoPaid}
-              onChange={(e) => {
-                setAlsoPaid(e.target.checked)
-                if (!e.target.checked) {
-                  setPayAmount('')
-                  setSplitPay(false)
-                  setPayMethod2('')
-                  setPayAmount2('')
-                }
-              }}
-              className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
-            />
-            <span className="text-sm font-medium text-slate-700">
-              El cliente ya pagó
-            </span>
-          </label>
+              <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-200 px-4 py-3">
+                <input
+                  type="checkbox"
+                  checked={alsoPaid}
+                  onChange={(e) => {
+                    setAlsoPaid(e.target.checked)
+                    if (!e.target.checked) {
+                      setPayAmount('')
+                      setSplitPay(false)
+                      setPayMethod2('')
+                      setPayAmount2('')
+                    }
+                  }}
+                  className="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                />
+                <span className="text-sm font-medium text-slate-700">
+                  El cliente ya pagó
+                </span>
+              </label>
+            </>
+          )}
 
-          {alsoPaid && (
+          {!prepaidOnly && alsoPaid && (
             <SplitPaymentSection
               total={total}
               amount={payAmount}
@@ -417,7 +438,9 @@ export function OrderActions({
             <Button
               type="submit"
               disabled={
-                busy || offline || !payMethod || (alsoPaid && !paymentReady)
+                busy ||
+                offline ||
+                (!prepaidOnly && (!payMethod || (alsoPaid && !paymentReady)))
               }
             >
               {busy

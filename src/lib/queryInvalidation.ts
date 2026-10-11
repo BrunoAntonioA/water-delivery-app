@@ -10,6 +10,7 @@ const ORDER_ROUTE_KEYS: readonly (readonly string[])[] = [
   ['open-routes'], // selector "agregar a ruta"
   ['assignable-orders'], // pedidos asignables a una ruta
   ['pending-pickups'], // retiros pendientes
+  ['prepayment-usage'], // saldo de prepagos (crear/borrar/entregar pedidos lo mueve)
 ]
 
 /**

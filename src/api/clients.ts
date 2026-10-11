@@ -104,8 +104,15 @@ export async function eraseClientData(
     .select('id', { count: 'exact', head: true })
     .eq('client_id', id)
   if (countErr) throw countErr
+  // Los prepagos también son registro contable (y su FK impide borrar al
+  // cliente): con prepagos se anonimiza igual que con pedidos.
+  const { count: ppCount, error: ppErr } = await supabase
+    .from('prepayments')
+    .select('id', { count: 'exact', head: true })
+    .eq('client_id', id)
+  if (ppErr) throw ppErr
 
-  if ((count ?? 0) > 0) {
+  if ((count ?? 0) > 0 || (ppCount ?? 0) > 0) {
     const { error: addrErr } = await supabase
       .from('addresses')
       .delete()

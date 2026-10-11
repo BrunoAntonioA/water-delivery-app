@@ -1441,6 +1441,8 @@ create policy "product_images_write" on storage.objects for all
 -- ============================================================================
 
 -- Crea un pedido con sus ítems en una sola transacción. Devuelve el id.
+-- Un ítem puede venir de un PREPAGO (clave opcional prepayment_id): vale $0 (ya
+-- se pagó) y descuenta del saldo. Si todo el pedido es prepagado queda pagado.
 create or replace function public.create_order(
   p_client_id uuid,
   p_address_id uuid,
@@ -1458,11 +1460,21 @@ declare
   v_pid     uuid;
   v_qty     int;
   v_price   numeric;
+  v_pp      uuid;
+  v_has_pp  boolean := false;
+  v_paid    boolean;
 begin
   if v_company is null then raise exception 'No autorizado'; end if;
   if p_client_id is null or not exists (
     select 1 from clients c where c.id = p_client_id and c.company_id = v_company
   ) then raise exception 'Cliente inválido'; end if;
+
+  -- Bloquea los prepagos usados: dos pedidos simultáneos no pueden gastar el
+  -- mismo saldo.
+  perform 1 from prepayments
+   where id in (select nullif(x ->> 'prepayment_id', '')::uuid
+                  from jsonb_array_elements(coalesce(p_items, '[]'::jsonb)) x)
+   for update;
 
   insert into orders (company_id, client_id, address_id, notes, status, total,
                       paid, payment_method, paid_amount, payments)
@@ -1474,18 +1486,28 @@ begin
   loop
     v_pid := (it ->> 'product_id')::uuid;
     v_qty := greatest(1, coalesce((it ->> 'quantity')::int, 1));
-    v_price := coalesce((it ->> 'unit_price')::numeric, 0);
+    v_pp := nullif(it ->> 'prepayment_id', '')::uuid;
+    if v_pp is not null then
+      v_price := 0; -- prepagado: no se cobra de nuevo
+      v_has_pp := true;
+    else
+      v_price := coalesce((it ->> 'unit_price')::numeric, 0);
+    end if;
     if not exists (select 1 from products where id = v_pid and company_id = v_company) then
       raise exception 'Producto inválido';
     end if;
-    insert into order_items (company_id, order_id, product_id, quantity, unit_price)
-    values (v_company, v_order, v_pid, v_qty, v_price);
+    insert into order_items (company_id, order_id, product_id, quantity, unit_price, prepayment_id)
+    values (v_company, v_order, v_pid, v_qty, v_price, v_pp);
     v_total := v_total + v_qty * v_price;
   end loop;
 
+  if v_has_pp then perform check_order_prepayments(v_order); end if;
+  v_paid := coalesce(p_paid, false) or (v_has_pp and v_total = 0);
+
   update orders set
     total = v_total,
-    paid_amount = case when coalesce(p_paid, false) then v_total else null end,
+    paid = v_paid,
+    paid_amount = case when v_paid then v_total else null end,
     payments = case when coalesce(p_paid, false) and p_payment_method is not null
                     then jsonb_build_array(jsonb_build_object('method', p_payment_method, 'amount', v_total))
                     else null end
@@ -1513,6 +1535,9 @@ declare
   v_pid     uuid;
   v_qty     int;
   v_price   numeric;
+  v_pp      uuid;
+  v_has_pp  boolean;
+  v_paid    boolean;
 begin
   if v_company is null then raise exception 'No autorizado'; end if;
   if not exists (select 1 from orders o where o.id = p_id and o.company_id = v_company) then
@@ -1522,19 +1547,29 @@ begin
     select 1 from clients c where c.id = p_client_id and c.company_id = v_company
   ) then raise exception 'Cliente inválido'; end if;
 
+  -- Bloquea los prepagos usados (ver create_order).
+  perform 1 from prepayments
+   where id in (select nullif(x ->> 'prepayment_id', '')::uuid
+                  from jsonb_array_elements(coalesce(p_items, '[]'::jsonb)) x)
+   for update;
+
+  -- Las líneas de prepago valen $0 (ya se pagaron).
   select coalesce(sum(greatest(1, coalesce((x ->> 'quantity')::int, 1))
-                      * coalesce((x ->> 'unit_price')::numeric, 0)), 0)
-    into v_total
+                      * case when nullif(x ->> 'prepayment_id', '') is not null then 0
+                             else coalesce((x ->> 'unit_price')::numeric, 0) end), 0),
+         coalesce(bool_or(nullif(x ->> 'prepayment_id', '') is not null), false)
+    into v_total, v_has_pp
   from jsonb_array_elements(coalesce(p_items, '[]'::jsonb)) x;
+  v_paid := coalesce(p_paid, false) or (v_has_pp and v_total = 0);
 
   update orders set
     client_id = p_client_id,
     address_id = p_address_id,
     notes = nullif(p_notes, ''),
     total = v_total,
-    paid = coalesce(p_paid, false),
+    paid = v_paid,
     payment_method = nullif(p_payment_method, '')::payment_method,
-    paid_amount = case when coalesce(p_paid, false) then v_total else null end,
+    paid_amount = case when v_paid then v_total else null end,
     payments = case when coalesce(p_paid, false) and p_payment_method is not null
                     then jsonb_build_array(jsonb_build_object('method', p_payment_method, 'amount', v_total))
                     else null end
@@ -1546,13 +1581,17 @@ begin
   loop
     v_pid := (it ->> 'product_id')::uuid;
     v_qty := greatest(1, coalesce((it ->> 'quantity')::int, 1));
-    v_price := coalesce((it ->> 'unit_price')::numeric, 0);
+    v_pp := nullif(it ->> 'prepayment_id', '')::uuid;
+    v_price := case when v_pp is not null then 0
+                    else coalesce((it ->> 'unit_price')::numeric, 0) end;
     if not exists (select 1 from products where id = v_pid and company_id = v_company) then
       raise exception 'Producto inválido';
     end if;
-    insert into order_items (company_id, order_id, product_id, quantity, unit_price)
-    values (v_company, p_id, v_pid, v_qty, v_price);
+    insert into order_items (company_id, order_id, product_id, quantity, unit_price, prepayment_id)
+    values (v_company, p_id, v_pid, v_qty, v_price, v_pp);
   end loop;
+
+  if v_has_pp then perform check_order_prepayments(p_id); end if;
 end$$;
 grant execute on function public.update_order(uuid, uuid, uuid, text, jsonb, boolean, text) to authenticated;
 
@@ -1736,3 +1775,328 @@ language sql stable security definer set search_path = public as $$
   order by o.created_at desc
 $$;
 grant execute on function public.assignable_order_ids() to authenticated;
+
+-- ============================================================================
+--  PREPAGOS: el cliente paga por adelantado productos que se le entregan de a
+--  poco. El INGRESO queda en el prepago (paid_at). Cada entrega es un pedido
+--  normal: sus líneas "de prepago" (order_items.prepayment_id) valen $0 y
+--  descuentan del saldo, y pueden convivir con líneas nuevas que sí se cobran.
+--  Anular el prepago = devolución completa registrada CON SU FECHA
+--  (refunded_at): el ingreso original no se borra, así el flujo de caja muestra
+--  el ingreso en su fecha y la devolución en la suya.
+-- ============================================================================
+create table if not exists prepayments (
+  id            uuid primary key default gen_random_uuid(),
+  company_id    uuid not null default current_company_id() references companies (id) on delete cascade,
+  client_id     uuid not null references clients (id) on delete restrict,
+  total         numeric(12, 2) not null check (total >= 0),  -- monto pagado
+  payments      jsonb not null default '[]'::jsonb,         -- desglose [{method, amount}]
+  notes         text,
+  paid_at       timestamptz not null default now(),          -- fecha del ingreso
+  refunded_at   timestamptz,                                  -- fecha de la devolución (null = vigente)
+  refund_amount numeric(12, 2),
+  created_by    uuid references profiles (id) on delete set null default auth.uid(),
+  created_at    timestamptz not null default now()
+);
+create index if not exists prepayments_company_paid_idx on prepayments (company_id, paid_at desc);
+create index if not exists prepayments_client_idx on prepayments (client_id);
+
+-- Productos comprados en el prepago (precio congelado al momento de pagar).
+create table if not exists prepayment_items (
+  id            uuid primary key default gen_random_uuid(),
+  company_id    uuid not null default current_company_id() references companies (id) on delete cascade,
+  prepayment_id uuid not null references prepayments (id) on delete cascade,
+  product_id    uuid not null references products (id) on delete restrict,
+  quantity      integer not null check (quantity > 0),
+  unit_price    numeric(12, 2) not null check (unit_price >= 0),
+  unique (prepayment_id, product_id)
+);
+create index if not exists prepayment_items_prepayment_idx on prepayment_items (prepayment_id);
+
+-- Línea de pedido que sale de un prepago (null = línea normal, se cobra).
+alter table order_items add column if not exists prepayment_id uuid
+  references prepayments (id) on delete restrict;
+create index if not exists order_items_prepayment_idx
+  on order_items (prepayment_id) where prepayment_id is not null;
+
+-- Prepagos: sólo admin/operador (datos financieros). El repartidor no los ve;
+-- en las entregas sólo ve que una línea es "Prepago" (order_items.prepayment_id).
+alter table prepayments enable row level security;
+alter table prepayment_items enable row level security;
+drop policy if exists "tenant_prepayments" on prepayments;
+create policy "tenant_prepayments" on prepayments for all
+  using (company_id = current_company_id() and current_user_role() <> 'repartidor')
+  with check (company_id = current_company_id() and current_user_role() <> 'repartidor');
+drop policy if exists "tenant_prepayment_items" on prepayment_items;
+create policy "tenant_prepayment_items" on prepayment_items for all
+  using (company_id = current_company_id() and current_user_role() <> 'repartidor')
+  with check (company_id = current_company_id() and current_user_role() <> 'repartidor');
+
+-- Valida las líneas de prepago de un pedido (ya insertadas): el prepago es de
+-- la empresa y del MISMO cliente, sigue vigente, incluye el producto, y lo usado
+-- en TODOS los pedidos no supera lo pagado. Si falla, la transacción se revierte.
+create or replace function public.check_order_prepayments(p_order_id uuid)
+returns void language plpgsql set search_path = public as $$
+declare
+  r record;
+begin
+  for r in
+    select oi.prepayment_id, oi.product_id
+    from order_items oi
+    where oi.order_id = p_order_id and oi.prepayment_id is not null
+    group by oi.prepayment_id, oi.product_id
+  loop
+    if not exists (
+      select 1 from prepayments pp join orders o on o.id = p_order_id
+      where pp.id = r.prepayment_id and pp.company_id = o.company_id
+        and pp.client_id = o.client_id and pp.refunded_at is null
+    ) then
+      raise exception 'Prepago inválido para este pedido';
+    end if;
+    if (select coalesce(sum(oi.quantity), 0) from order_items oi
+         where oi.prepayment_id = r.prepayment_id and oi.product_id = r.product_id)
+       > (select coalesce(sum(pi.quantity), 0) from prepayment_items pi
+           where pi.prepayment_id = r.prepayment_id and pi.product_id = r.product_id)
+    then
+      raise exception 'La cantidad supera el saldo prepagado';
+    end if;
+  end loop;
+end$$;
+
+-- Valida los datos de un prepago (al crearlo o editarlo): cliente, productos y
+-- pago. Lanza un error si algo no cuadra.
+create or replace function public.check_prepayment_input(
+  p_company uuid,
+  p_client_id uuid,
+  p_items jsonb,
+  p_total numeric,
+  p_payments jsonb
+) returns void
+language plpgsql set search_path = public as $$
+declare
+  v_n   int;
+  v_sum numeric;
+begin
+  if p_client_id is null or not exists (
+    select 1 from clients c where c.id = p_client_id and c.company_id = p_company
+  ) then raise exception 'Cliente inválido'; end if;
+  if p_total is null or p_total < 0 then raise exception 'Monto inválido'; end if;
+
+  -- Productos: al menos uno, todos de la empresa y con cantidad > 0.
+  if jsonb_array_length(coalesce(p_items, '[]'::jsonb)) = 0 then
+    raise exception 'El prepago debe tener al menos un producto';
+  end if;
+  if exists (
+    select 1 from jsonb_array_elements(p_items) x
+    left join products p
+      on p.id = (x ->> 'product_id')::uuid and p.company_id = p_company
+    where p.id is null or coalesce((x ->> 'quantity')::int, 0) <= 0
+  ) then raise exception 'Producto o cantidad inválida'; end if;
+
+  -- Pago: hasta dos tramos con método válido y monto > 0; la suma = monto.
+  select count(*), coalesce(sum((x ->> 'amount')::numeric), 0)
+    into v_n, v_sum
+  from jsonb_array_elements(coalesce(p_payments, '[]'::jsonb)) x;
+  if v_n > 2 then raise exception 'Máximo dos métodos de pago'; end if;
+  if exists (
+    select 1 from jsonb_array_elements(coalesce(p_payments, '[]'::jsonb)) x
+    where coalesce((x ->> 'amount')::numeric, 0) <= 0
+       or coalesce(x ->> 'method', '') not in ('efectivo', 'transferencia', 'tarjeta')
+  ) then raise exception 'Pago inválido'; end if;
+  if round(v_sum, 2) <> round(p_total, 2) then
+    raise exception 'El pago no cuadra con el monto';
+  end if;
+end$$;
+
+-- Registra un prepago (ingreso de hoy). p_items: [{product_id, quantity}];
+-- p_total: monto pagado (puede incluir descuento); p_payments: [{method, amount}]
+-- (1 o 2 tramos) cuya suma es p_total. Devuelve el id.
+create or replace function public.create_prepayment(
+  p_client_id uuid,
+  p_items jsonb,
+  p_total numeric,
+  p_payments jsonb,
+  p_notes text
+) returns uuid
+language plpgsql security definer set search_path = public as $$
+declare
+  v_company uuid := current_company_id();
+  v_id      uuid;
+begin
+  if v_company is null or current_user_role() = 'repartidor' then
+    raise exception 'No autorizado';
+  end if;
+  perform check_prepayment_input(v_company, p_client_id, p_items, p_total, p_payments);
+
+  insert into prepayments (company_id, client_id, total, payments, notes)
+  values (v_company, p_client_id, round(p_total, 2),
+          coalesce(p_payments, '[]'::jsonb), nullif(trim(p_notes), ''))
+  returning id into v_id;
+
+  -- Un producto repetido se suma en una sola línea; precio = el vigente hoy.
+  insert into prepayment_items (company_id, prepayment_id, product_id, quantity, unit_price)
+  select v_company, v_id, p.id, sum((x ->> 'quantity')::int), p.price
+  from jsonb_array_elements(p_items) x
+  join products p on p.id = (x ->> 'product_id')::uuid
+  group by p.id, p.price;
+
+  return v_id;
+end$$;
+grant execute on function public.create_prepayment(uuid, jsonb, numeric, jsonb, text) to authenticated;
+
+-- Edita un prepago vigente (corrige productos, cantidades, monto, pago o notas).
+-- Reglas para no romper lo ya hecho: ningún producto queda por debajo de lo ya
+-- entregado/programado, y el cliente sólo cambia si aún no hay entregas. Los
+-- productos que siguen conservan su precio congelado; los nuevos toman el de hoy.
+-- El monto corregido cuenta en la fecha de pago original (es una corrección).
+create or replace function public.update_prepayment(
+  p_id uuid,
+  p_client_id uuid,
+  p_items jsonb,
+  p_total numeric,
+  p_payments jsonb,
+  p_notes text
+) returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  v_company  uuid := current_company_id();
+  v_client   uuid;
+  v_refunded timestamptz;
+begin
+  if v_company is null or current_user_role() = 'repartidor' then
+    raise exception 'No autorizado';
+  end if;
+  -- Bloquea el prepago: así no se edita mientras se crea una entrega con él.
+  select client_id, refunded_at into v_client, v_refunded
+    from prepayments where id = p_id and company_id = v_company
+     for update;
+  if not found then raise exception 'Prepago no encontrado'; end if;
+  if v_refunded is not null then
+    raise exception 'No se puede editar un prepago anulado';
+  end if;
+  perform check_prepayment_input(v_company, p_client_id, p_items, p_total, p_payments);
+
+  if p_client_id <> v_client and exists (
+    select 1 from order_items where prepayment_id = p_id
+  ) then
+    raise exception 'No se puede cambiar el cliente: el prepago ya tiene entregas';
+  end if;
+
+  -- Ningún producto puede quedar por debajo de lo ya usado (entregado + programado).
+  if exists (
+    select 1
+    from (select product_id, sum(quantity) as used
+            from order_items where prepayment_id = p_id
+           group by product_id) u
+    where u.used > coalesce((
+      select sum((x ->> 'quantity')::int)
+        from jsonb_array_elements(p_items) x
+       where (x ->> 'product_id')::uuid = u.product_id), 0)
+  ) then
+    raise exception 'Un producto quedaría por debajo de lo ya entregado o programado';
+  end if;
+
+  update prepayments set
+    client_id = p_client_id,
+    total = round(p_total, 2),
+    payments = coalesce(p_payments, '[]'::jsonb),
+    notes = nullif(trim(p_notes), '')
+  where id = p_id;
+
+  -- Productos: quita los que ya no vienen, actualiza cantidades y agrega nuevos.
+  delete from prepayment_items pi
+   where pi.prepayment_id = p_id
+     and not exists (select 1 from jsonb_array_elements(p_items) x
+                      where (x ->> 'product_id')::uuid = pi.product_id);
+  update prepayment_items pi set quantity = s.q
+    from (select (x ->> 'product_id')::uuid as pid, sum((x ->> 'quantity')::int) as q
+            from jsonb_array_elements(p_items) x group by 1) s
+   where pi.prepayment_id = p_id and pi.product_id = s.pid;
+  insert into prepayment_items (company_id, prepayment_id, product_id, quantity, unit_price)
+  select v_company, p_id, p.id, s.q, p.price
+    from (select (x ->> 'product_id')::uuid as pid, sum((x ->> 'quantity')::int) as q
+            from jsonb_array_elements(p_items) x group by 1) s
+    join products p on p.id = s.pid
+   where not exists (select 1 from prepayment_items pi
+                      where pi.prepayment_id = p_id and pi.product_id = s.pid);
+end$$;
+grant execute on function public.update_prepayment(uuid, uuid, jsonb, numeric, jsonb, text) to authenticated;
+
+-- Uso del saldo por prepago y producto: ENTREGADO (pedidos entregados) y
+-- PROGRAMADO (pedidos aún sin entregar). Lo disponible = comprado − ambos.
+create or replace function public.prepayment_usage(p_client_id uuid default null)
+returns table(prepayment_id uuid, product_id uuid, delivered bigint, scheduled bigint)
+language sql stable security definer set search_path = public as $$
+  select oi.prepayment_id, oi.product_id,
+         coalesce(sum(oi.quantity) filter (where o.status <> 'ordered'), 0),
+         coalesce(sum(oi.quantity) filter (where o.status = 'ordered'), 0)
+  from order_items oi
+  join orders o on o.id = oi.order_id
+  join prepayments pp on pp.id = oi.prepayment_id
+  where pp.company_id = current_company_id()
+    and current_user_role() <> 'repartidor'
+    and (p_client_id is null or pp.client_id = p_client_id)
+  group by oi.prepayment_id, oi.product_id
+$$;
+grant execute on function public.prepayment_usage(uuid) to authenticated;
+
+-- Cancela las entregas PENDIENTES de un prepago: quita sus líneas de los pedidos
+-- sin entregar y elimina los pedidos que quedan vacíos (sus paradas de ruta caen
+-- en cascada). Lo ya entregado no se toca. Devuelve cuántos pedidos se afectaron.
+create or replace function public.cancel_prepayment_pending(p_id uuid)
+returns integer
+language plpgsql security definer set search_path = public as $$
+declare
+  v_company uuid := current_company_id();
+  v_orders  uuid[];
+begin
+  if v_company is null or current_user_role() = 'repartidor' then
+    raise exception 'No autorizado';
+  end if;
+  perform 1 from prepayments where id = p_id and company_id = v_company for update;
+  if not found then raise exception 'Prepago no encontrado'; end if;
+
+  select array_agg(distinct oi.order_id) into v_orders
+  from order_items oi join orders o on o.id = oi.order_id
+  where oi.prepayment_id = p_id and o.status = 'ordered';
+  if v_orders is null then return 0; end if;
+
+  delete from order_items where prepayment_id = p_id and order_id = any(v_orders);
+  delete from orders o
+  where o.id = any(v_orders)
+    and not exists (select 1 from order_items oi where oi.order_id = o.id);
+  return coalesce(array_length(v_orders, 1), 0);
+end$$;
+grant execute on function public.cancel_prepayment_pending(uuid) to authenticated;
+
+-- Anula el prepago completo con DEVOLUCIÓN del total, registrada hoy. Elimina
+-- sus líneas de TODOS los pedidos (pendientes y entregados) y los pedidos que
+-- quedan vacíos; los pedidos con otras líneas (cobradas aparte) se conservan.
+create or replace function public.refund_prepayment(p_id uuid)
+returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  v_company uuid := current_company_id();
+  v_total   numeric;
+  v_orders  uuid[];
+begin
+  if v_company is null or current_user_role() = 'repartidor' then
+    raise exception 'No autorizado';
+  end if;
+  select total into v_total from prepayments
+   where id = p_id and company_id = v_company and refunded_at is null
+   for update;
+  if not found then raise exception 'Prepago no encontrado o ya anulado'; end if;
+
+  select array_agg(distinct order_id) into v_orders
+  from order_items where prepayment_id = p_id;
+  delete from order_items where prepayment_id = p_id;
+  if v_orders is not null then
+    delete from orders o
+    where o.id = any(v_orders)
+      and not exists (select 1 from order_items oi where oi.order_id = o.id);
+  end if;
+
+  update prepayments set refunded_at = now(), refund_amount = v_total where id = p_id;
+end$$;
+grant execute on function public.refund_prepayment(uuid) to authenticated;

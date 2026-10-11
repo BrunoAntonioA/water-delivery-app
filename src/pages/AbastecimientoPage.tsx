@@ -1,5 +1,11 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
+import { currentMonthRange, sameRange } from '../lib/dateRange'
 import {
   createProvider,
   createSupplyPurchase,
@@ -77,9 +83,15 @@ export default function AbastecimientoPage() {
   const qc = useQueryClient()
   const { company } = useAuth()
 
+  // Rango de fechas: arranca en el mes actual y se filtra EN EL SERVIDOR
+  // (ahorro de egress).
+  const [defaultRange] = useState(currentMonthRange)
+  const [fromDate, setFromDate] = useState(defaultRange.from)
+  const [toDate, setToDate] = useState(defaultRange.to)
   const { data: purchases, isLoading } = useQuery({
-    queryKey: ['supply_purchases'],
-    queryFn: listSupplyPurchases,
+    queryKey: ['supply_purchases', { from: fromDate, to: toDate }],
+    queryFn: () => listSupplyPurchases({ from: fromDate, to: toDate }),
+    placeholderData: keepPreviousData,
   })
   const { data: providers } = useQuery({
     queryKey: ['providers'],
@@ -97,8 +109,6 @@ export default function AbastecimientoPage() {
   const [page, setPage] = useState(1)
 
   // Filtros.
-  const [fromDate, setFromDate] = useState('')
-  const [toDate, setToDate] = useState('')
   const [providerFilter, setProviderFilter] = useState('')
 
   // Alta rápida de proveedor dentro del formulario de abastecimiento.
@@ -258,10 +268,12 @@ export default function AbastecimientoPage() {
     currentPage * PAGE_SIZE
   )
 
-  const hasFilters = Boolean(fromDate || toDate || providerFilter)
+  const hasFilters = Boolean(
+    !sameRange({ from: fromDate, to: toDate }, defaultRange) || providerFilter
+  )
   function clearFilters() {
-    setFromDate('')
-    setToDate('')
+    setFromDate(defaultRange.from)
+    setToDate(defaultRange.to)
     setProviderFilter('')
     setPage(1)
   }
@@ -364,6 +376,7 @@ export default function AbastecimientoPage() {
               setPage(1)
             }}
             label="Fecha"
+            presets
           />
         </div>
         {hasFilters && (

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { ALL_TIME, monthRange, type DateRange } from '../lib/dateRange'
 import { InfoHint, TextInput } from './ui'
 
 /**
@@ -6,6 +7,7 @@ import { InfoHint, TextInput } from './ui'
  * - Apagado → un solo selector (un día): from y to quedan iguales.
  * - Encendido → dos selectores (desde / hasta).
  * El consumidor mantiene `from` y `to` como strings 'YYYY-MM-DD' (o '').
+ * Con `presets` muestra atajos: Este mes / Mes anterior / Todo.
  */
 export function DateRangeFilter({
   from,
@@ -13,15 +15,26 @@ export function DateRangeFilter({
   onChange,
   label = 'Fecha',
   hint,
+  presets = false,
 }: {
   from: string
   to: string
   onChange: (from: string, to: string) => void
   label?: string
   hint?: string
+  presets?: boolean
 }) {
-  // Se infiere el modo inicial: si hay un "hasta" distinto del "desde", es rango.
-  const [range, setRange] = useState(() => Boolean(from && to && from !== to))
+  // Se infiere el modo inicial: si hay un "hasta" distinto del "desde", o no
+  // hay fechas (todo el período), es rango.
+  const [range, setRange] = useState(
+    () => Boolean(from && to && from !== to) || (presets && !from && !to)
+  )
+
+  const presetList: [string, DateRange][] = [
+    ['Este mes', monthRange(0)],
+    ['Mes anterior', monthRange(-1)],
+    ['Todo', ALL_TIME],
+  ]
 
   function toggle() {
     const next = !range
@@ -62,6 +75,36 @@ export function DateRangeFilter({
           </span>
         </button>
       </div>
+
+      {presets && (
+        <div className="mb-2 flex flex-wrap gap-1">
+          {presetList.map(([name, r]) => {
+            const active = from === r.from && to === r.to
+            return (
+              <button
+                key={name}
+                type="button"
+                onClick={() => {
+                  setRange(true)
+                  onChange(r.from, r.to)
+                }}
+                className={`rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors ${
+                  active
+                    ? 'bg-sky-600 text-white'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+                title={
+                  r === ALL_TIME
+                    ? 'Todo el historial (descarga más datos)'
+                    : undefined
+                }
+              >
+                {name}
+              </button>
+            )
+          })}
+        </div>
+      )}
 
       {range ? (
         <div className="flex flex-wrap items-center gap-2">

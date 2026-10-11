@@ -1,4 +1,6 @@
 import { supabase } from '../lib/supabase'
+import { ALL_TIME, type DateRange } from '../lib/dateRange'
+import { chunks, routeIdsInRange } from './routeRange'
 import type {
   Client,
   OrderDetail,
@@ -9,7 +11,7 @@ import type {
 
 // Sólo las columnas que consume la UI (ahorro de egress).
 const ORDER_SELECT =
-  'order:orders(*, client:clients(id, name, surname, phone), address:addresses(id, address, comuna, observation), items:order_items(id, product_id, quantity, unit_price, product:products(id, name)))'
+  'order:orders(*, client:clients(id, name, surname, phone), address:addresses(id, address, comuna, observation), items:order_items(id, product_id, quantity, unit_price, prepayment_id, product:products(id, name)))'
 
 export interface RouteInput {
   name: string
@@ -385,12 +387,14 @@ export interface RouteLoadRow {
 }
 
 /**
- * Todas las cargas de ruta (carga inicial de insumos), con la fecha y el
- * repartidor de su ruta. Sirve para el "Movimientos de insumos" del Resumen de
- * entregas (columna Carga). Se filtra por fecha/repartidor en el cliente, igual
- * que el resto de ese resumen.
+ * Cargas de ruta (carga inicial de insumos), con la fecha y el repartidor de su
+ * ruta. Sirve para el "Movimientos de insumos" del Resumen de entregas (columna
+ * Carga). Con rango, sólo las de rutas de esas fechas (filtrado en el servidor);
+ * el filtro por repartidor se aplica en el cliente.
  */
-export async function listRouteLoads(): Promise<RouteLoadRow[]> {
+export async function listRouteLoads(
+  range: DateRange = ALL_TIME
+): Promise<RouteLoadRow[]> {
   type Row = {
     supply_id: string
     quantity: number
@@ -399,28 +403,35 @@ export async function listRouteLoads(): Promise<RouteLoadRow[]> {
       | { route_date: string; driver_id: string | null }[]
       | null
   }
+  const hasRange = Boolean(range.from || range.to)
+  // Con rango: sólo las rutas de esas fechas (en tandas de ids).
+  const idChunks = hasRange ? chunks(await routeIdsInRange(range)) : [null]
   // Se pagina con .range(): Supabase corta en 1000 filas y las cargas superan
   // ese número, así que la columna "Carga" del resumen quedaría corta.
   const PAGE = 1000
   const all: RouteLoadRow[] = []
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await supabase
-      .from('route_loads')
-      .select('supply_id, quantity, route:routes!inner(route_date, driver_id)')
-      .order('id', { ascending: true })
-      .range(from, from + PAGE - 1)
-    if (error) throw error
-    const batch = ((data ?? []) as unknown as Row[]).map((r) => {
-      const route = Array.isArray(r.route) ? r.route[0] : r.route
-      return {
-        supply_id: r.supply_id,
-        quantity: r.quantity,
-        route_date: route?.route_date ?? '',
-        driver_id: route?.driver_id ?? null,
-      }
-    })
-    all.push(...batch)
-    if (batch.length < PAGE) break
+  for (const ids of idChunks) {
+    for (let from = 0; ; from += PAGE) {
+      let q = supabase
+        .from('route_loads')
+        .select('supply_id, quantity, route:routes!inner(route_date, driver_id)')
+      if (ids) q = q.in('route_id', ids)
+      const { data, error } = await q
+        .order('id', { ascending: true })
+        .range(from, from + PAGE - 1)
+      if (error) throw error
+      const batch = ((data ?? []) as unknown as Row[]).map((r) => {
+        const route = Array.isArray(r.route) ? r.route[0] : r.route
+        return {
+          supply_id: r.supply_id,
+          quantity: r.quantity,
+          route_date: route?.route_date ?? '',
+          driver_id: route?.driver_id ?? null,
+        }
+      })
+      all.push(...batch)
+      if (batch.length < PAGE) break
+    }
   }
   return all
 }
@@ -570,7 +581,7 @@ export async function listAssignableOrders(): Promise<OrderDetail[]> {
   const { data, error: e2 } = await supabase
     .from('orders')
     .select(
-      '*, client:clients(id, name, surname, phone), address:addresses(id, address, comuna, observation), items:order_items(id, product_id, quantity, unit_price, product:products(id, name))'
+      '*, client:clients(id, name, surname, phone), address:addresses(id, address, comuna, observation), items:order_items(id, product_id, quantity, unit_price, prepayment_id, product:products(id, name))'
     )
     .in('id', ids)
   if (e2) throw e2

@@ -124,6 +124,23 @@ export function routeSupplyNeeds(
 }
 
 /**
+ * ¿El pedido está cubierto 100% por un prepago? (todas sus líneas salen de un
+ * prepago, total $0 y pagado): no hay nada que cobrar ni registrar como pago.
+ */
+export function isFullyPrepaid(order: {
+  paid: boolean
+  total: number
+  items: { prepayment_id?: string | null }[]
+}): boolean {
+  return (
+    order.paid &&
+    Number(order.total) === 0 &&
+    order.items.length > 0 &&
+    order.items.every((it) => Boolean(it.prepayment_id))
+  )
+}
+
+/**
  * Nombre a mostrar de un pedido: el del cliente registrado, o el nombre libre
  * de una venta rápida (sin cliente), o un texto por defecto.
  */

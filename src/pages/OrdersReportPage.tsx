@@ -1,8 +1,14 @@
-import { useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { listOrders } from '../api/orders'
+import {
+  listOrders,
+  listOrdersByRouteDate,
+  listUnpaidOrders,
+} from '../api/orders'
+import { ALL_TIME, currentMonthRange, sameRange } from '../lib/dateRange'
 import { listClients } from '../api/clients'
 import { listCosts } from '../api/costs'
+import { listPrepayments } from '../api/prepayments'
 import { listDrivers, type Driver } from '../api/routes'
 import { listProducts } from '../api/products'
 import { listSupplies } from '../api/supplies'
@@ -13,10 +19,10 @@ import {
   saveReport,
 } from '../lib/reportPdf'
 import type {
-  CostWithCategory,
   OrderDetail,
   OrderStatus,
   PaymentMethod,
+  Prepayment,
   Product,
   Supply,
 } from '../types/db'
@@ -26,7 +32,12 @@ import {
   formatMoney,
   toLocalDateStr,
 } from '../lib/format'
-import { orderClientName, orderPaymentList, paidWithMethod } from '../lib/order'
+import {
+  isFullyPrepaid,
+  orderClientName,
+  orderPaymentList,
+  paidWithMethod,
+} from '../lib/order'
 import { ClientCombobox } from '../components/ClientCombobox'
 import {
   PAYMENT_LABELS,
@@ -47,13 +58,37 @@ import {
 
 const PAGE_SIZE = 15
 
-type StatusFilter = 'all' | OrderStatus
+// 'prepaid' = sólo las compras de prepago (no son pedidos con entrega).
+type StatusFilter = 'all' | OrderStatus | 'prepaid'
 
 const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
   { value: 'all', label: 'Todos' },
   { value: 'ordered', label: 'Sin entregar' },
   { value: 'delivered', label: 'Entregado' },
+  { value: 'prepaid', label: 'Prepagos' },
 ]
+
+/**
+ * Fila del reporte de pedidos: un pedido, o una compra de PREPAGO (el dinero
+ * entra ahí; sus entregas valen $0), para que el total refleje lo cobrado.
+ */
+type ReportRow =
+  | { kind: 'order'; key: string; date: string; order: OrderDetail }
+  | { kind: 'prepayment'; key: string; date: string; p: Prepayment }
+
+/** Detalle de productos de un pedido; las líneas de prepago se marcan. */
+const orderItemsText = (o: OrderDetail) =>
+  o.items
+    .map(
+      (it) =>
+        `${it.quantity} x ${it.product?.name ?? 'Producto'}${it.prepayment_id ? ' (prepago)' : ''}`
+    )
+    .join('; ')
+
+const prepaymentItemsText = (p: Prepayment) =>
+  p.items
+    .map((it) => `${it.quantity} x ${it.product?.name ?? 'Producto'}`)
+    .join('; ')
 
 type PaidFilter = 'all' | 'paid' | 'unpaid'
 
@@ -66,17 +101,22 @@ const PAID_FILTERS: { value: PaidFilter; label: string }[] = [
 
 export default function OrdersReportPage() {
   const { company } = useAuth()
+  const [tab, setTab] = useState<'pedidos' | 'repartidores' | 'caja'>('pedidos')
+  // Pestaña Pedidos: rango por fecha de CREACIÓN. Arranca en el mes actual y se
+  // filtra EN EL SERVIDOR (ahorro de egress). Cada pestaña pide sus propios
+  // datos según su rango; si coinciden, comparten la misma consulta en caché.
+  const [defaultRange] = useState(currentMonthRange)
+  const [fromDate, setFromDate] = useState(defaultRange.from)
+  const [toDate, setToDate] = useState(defaultRange.to)
   const { data: orders, isLoading } = useQuery({
-    queryKey: ['orders'],
-    queryFn: listOrders,
+    queryKey: ['orders', 'report', { from: fromDate, to: toDate }],
+    queryFn: () => listOrders({ from: fromDate, to: toDate }),
+    enabled: tab === 'pedidos',
+    placeholderData: keepPreviousData,
   })
   const { data: clients } = useQuery({
     queryKey: ['clients'],
     queryFn: listClients,
-  })
-  const { data: costs } = useQuery({
-    queryKey: ['costs'],
-    queryFn: listCosts,
   })
   const { data: driversList } = useQuery({
     queryKey: ['drivers'],
@@ -91,7 +131,13 @@ export default function OrdersReportPage() {
     queryFn: listSupplies,
   })
 
-  const [tab, setTab] = useState<'pedidos' | 'repartidores' | 'caja'>('pedidos')
+  // Prepagos: filas del reporte de pedidos y ingresos/devoluciones del flujo de
+  // caja (tabla pequeña).
+  const { data: prepayments } = useQuery({
+    queryKey: ['prepayments'],
+    queryFn: listPrepayments,
+    enabled: tab === 'caja' || tab === 'pedidos',
+  })
   // Cada pestaña "registra" su exportador; el botón del encabezado ejecuta el
   // de la pestaña activa, para que el botón se vea igual en todas.
   const exporterRef = useRef<null | (() => void)>(null)
@@ -100,8 +146,6 @@ export default function OrdersReportPage() {
     exporterRef.current = fn
     setChildCanExport(Boolean(fn))
   }, [])
-  const [fromDate, setFromDate] = useState('')
-  const [toDate, setToDate] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [paidFilter, setPaidFilter] = useState<PaidFilter>('all')
   const [clientId, setClientId] = useState('')
@@ -148,21 +192,72 @@ export default function OrdersReportPage() {
     paymentFilter,
   ])
 
+  // Compras de prepago del período (por FECHA DE PAGO), con los mismos filtros
+  // que aplican: no tienen repartidor ni estado de entrega y siempre están pagadas.
+  const filteredPrepayments = useMemo(() => {
+    if (driverId || paidFilter === 'unpaid') return []
+    if (statusFilter !== 'all' && statusFilter !== 'prepaid') return []
+    return (prepayments ?? []).filter((p) => {
+      const date = toLocalDateStr(p.paid_at)
+      if (fromDate && date < fromDate) return false
+      if (toDate && date > toDate) return false
+      if (clientId && p.client_id !== clientId) return false
+      if (
+        paymentFilter !== 'all' &&
+        !p.payments.some((x) => x.method === paymentFilter)
+      )
+        return false
+      return true
+    })
+  }, [
+    prepayments,
+    fromDate,
+    toDate,
+    clientId,
+    driverId,
+    paidFilter,
+    statusFilter,
+    paymentFilter,
+  ])
+
+  // Pedidos + prepagos, del más nuevo al más antiguo.
+  const rows = useMemo((): ReportRow[] => {
+    const list: ReportRow[] = [
+      ...filtered.map((o) => ({
+        kind: 'order' as const,
+        key: o.id,
+        date: o.created_at,
+        order: o,
+      })),
+      ...filteredPrepayments.map((p) => ({
+        kind: 'prepayment' as const,
+        key: `pp-${p.id}`,
+        date: p.paid_at,
+        p,
+      })),
+    ]
+    return list.sort((a, b) => b.date.localeCompare(a.date))
+  }, [filtered, filteredPrepayments])
+
+  // Total cobrado: pedidos + prepagos vigentes (un prepago anulado se devolvió).
   const totalSum = useMemo(
-    () => filtered.reduce((sum, o) => sum + Number(o.total), 0),
-    [filtered]
+    () =>
+      filtered.reduce((sum, o) => sum + Number(o.total), 0) +
+      filteredPrepayments
+        .filter((p) => !p.refunded_at)
+        .reduce((sum, p) => sum + Number(p.total), 0),
+    [filtered, filteredPrepayments]
   )
 
-  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE))
   const currentPage = Math.min(page, pageCount)
-  const pageItems = filtered.slice(
+  const pageItems = rows.slice(
     (currentPage - 1) * PAGE_SIZE,
     currentPage * PAGE_SIZE
   )
 
   const hasFilters = Boolean(
-    fromDate ||
-      toDate ||
+    !sameRange({ from: fromDate, to: toDate }, defaultRange) ||
       clientId ||
       statusFilter !== 'all' ||
       paidFilter !== 'all' ||
@@ -171,8 +266,8 @@ export default function OrdersReportPage() {
   )
 
   function clearAll() {
-    setFromDate('')
-    setToDate('')
+    setFromDate(defaultRange.from)
+    setToDate(defaultRange.to)
     setStatusFilter('all')
     setPaidFilter('all')
     setClientId('')
@@ -182,8 +277,12 @@ export default function OrdersReportPage() {
   }
 
   function exportPdf() {
-    if (filtered.length === 0) return
-    const subtitle = `${filtered.length} pedidos · Total ${formatMoney(totalSum)} · Generado ${new Date().toLocaleDateString('es-CL')}`
+    if (rows.length === 0) return
+    const counts = [`${filtered.length} pedidos`]
+    if (filteredPrepayments.length > 0) {
+      counts.push(`${filteredPrepayments.length} prepagos`)
+    }
+    const subtitle = `${counts.join(' · ')} · Total ${formatMoney(totalSum)} · Generado ${new Date().toLocaleDateString('es-CL')}`
     const r = makeReportDoc('Reporte de pedidos', company?.name, subtitle, true)
     addReportTable(
       r,
@@ -199,26 +298,49 @@ export default function OrdersReportPage() {
         'Estado',
         'Pago',
       ],
-      filtered.map((o) => [
-        formatDatePart(o.created_at),
-        o.routeDate ? formatDateShort(o.routeDate) : '—',
-        orderClientName(o),
-        o.driverName ?? '',
-        o.client?.phone ?? '',
-        o.address
-          ? [o.address.address, o.address.comuna].filter(Boolean).join(', ')
-          : '',
-        o.items
-          .map((it) => `${it.quantity} x ${it.product?.name ?? 'Producto'}`)
-          .join('; '),
-        formatMoney(o.total),
-        STATUS_LABELS[o.status],
-        o.paid
-          ? orderPaymentList(o)
-              .map((p) => PAYMENT_LABELS[p.method])
-              .join(' + ')
-          : '',
-      ])
+      rows.map((row) => {
+        if (row.kind === 'prepayment') {
+          const p = row.p
+          return [
+            formatDatePart(p.paid_at),
+            '—',
+            prepaymentClientName(p),
+            '',
+            p.client?.phone ?? '',
+            '',
+            prepaymentItemsText(p),
+            p.refunded_at
+              ? `${formatMoney(Number(p.total))} (devuelto)`
+              : formatMoney(Number(p.total)),
+            p.refunded_at ? 'Prepago anulado' : 'Prepago (compra)',
+            p.payments.map((x) => PAYMENT_LABELS[x.method]).join(' + '),
+          ]
+        }
+        const o = row.order
+        const fromPrepaid = o.items.some((it) => it.prepayment_id)
+        return [
+          formatDatePart(o.created_at),
+          o.routeDate ? formatDateShort(o.routeDate) : '—',
+          orderClientName(o),
+          o.driverName ?? '',
+          o.client?.phone ?? '',
+          o.address
+            ? [o.address.address, o.address.comuna].filter(Boolean).join(', ')
+            : '',
+          orderItemsText(o),
+          formatMoney(o.total),
+          fromPrepaid
+            ? `${STATUS_LABELS[o.status]} · de prepago`
+            : STATUS_LABELS[o.status],
+          isFullyPrepaid(o)
+            ? 'Prepago'
+            : o.paid
+              ? orderPaymentList(o)
+                  .map((p) => PAYMENT_LABELS[p.method])
+                  .join(' + ')
+              : '',
+        ]
+      })
     )
     saveReport(r, 'reporte-pedidos.pdf')
   }
@@ -231,9 +353,7 @@ export default function OrdersReportPage() {
         action={
           <Button
             variant="secondary"
-            disabled={
-              tab === 'pedidos' ? filtered.length === 0 : !childCanExport
-            }
+            disabled={tab === 'pedidos' ? rows.length === 0 : !childCanExport}
             onClick={() => {
               if (tab === 'pedidos') exportPdf()
               else exporterRef.current?.()
@@ -270,8 +390,6 @@ export default function OrdersReportPage() {
 
       {tab === 'repartidores' && (
         <RepartidoresTab
-          orders={orders ?? []}
-          costs={costs ?? []}
           products={products ?? []}
           supplies={supplies ?? []}
           drivers={driversList ?? []}
@@ -281,8 +399,7 @@ export default function OrdersReportPage() {
       )}
       {tab === 'caja' && (
         <CashFlowTab
-          orders={orders ?? []}
-          costs={costs ?? []}
+          prepayments={prepayments ?? []}
           companyName={company?.name}
           registerExporter={registerExporter}
         />
@@ -313,6 +430,7 @@ export default function OrdersReportPage() {
               setPage(1)
             }}
             label="Fecha de creación"
+            presets
           />
           <div>
             <Label>Repartidor</Label>
@@ -425,15 +543,22 @@ export default function OrdersReportPage() {
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm">
         <span className="text-slate-500">
           {filtered.length} {filtered.length === 1 ? 'pedido' : 'pedidos'}
+          {filteredPrepayments.length > 0 &&
+            ` · ${filteredPrepayments.length} ${
+              filteredPrepayments.length === 1 ? 'prepago' : 'prepagos'
+            }`}
         </span>
-        <span className="font-semibold text-slate-900">
+        <span className="flex items-center gap-1.5 font-semibold text-slate-900">
           Total: {formatMoney(totalSum)}
+          {filteredPrepayments.length > 0 && (
+            <InfoHint text="Incluye los prepagos (el dinero se cobra al comprar el prepago; sus entregas valen $0). No incluye prepagos anulados." />
+          )}
         </span>
       </div>
 
       {isLoading ? (
         <Spinner />
-      ) : filtered.length === 0 ? (
+      ) : rows.length === 0 ? (
         <EmptyState>No hay pedidos con esos filtros.</EmptyState>
       ) : (
         <>
@@ -453,14 +578,70 @@ export default function OrdersReportPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {pageItems.map((o) => {
+                  {pageItems.map((row) => {
+                    if (row.kind === 'prepayment') {
+                      const p = row.p
+                      return (
+                        <tr
+                          key={row.key}
+                          className="border-b border-slate-100 bg-violet-50/40 last:border-0 [&>td]:text-center"
+                        >
+                          <td className="whitespace-nowrap px-3 py-2 text-slate-500">
+                            {formatDatePart(p.paid_at)}
+                          </td>
+                          <td className="px-3 py-2 text-slate-400">—</td>
+                          <td className="px-3 py-2 font-medium text-slate-800">
+                            {prepaymentClientName(p)}
+                          </td>
+                          <td className="px-3 py-2 text-slate-400">—</td>
+                          <td
+                            className="px-3 py-2 text-slate-600"
+                            title={prepaymentItemsText(p)}
+                          >
+                            {p.items.reduce((s, it) => s + it.quantity, 0)}
+                          </td>
+                          <td
+                            className={`whitespace-nowrap px-3 py-2 font-medium ${
+                              p.refunded_at
+                                ? 'text-slate-400 line-through'
+                                : 'text-slate-800'
+                            }`}
+                          >
+                            {formatMoney(Number(p.total))}
+                          </td>
+                          <td className="px-3 py-2">
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                                p.refunded_at
+                                  ? 'bg-slate-200 text-slate-600'
+                                  : 'bg-violet-100 text-violet-800'
+                              }`}
+                              title={
+                                p.refunded_at
+                                  ? `Anulado: devolución el ${formatDatePart(p.refunded_at)}`
+                                  : 'Compra de prepago: el dinero entra aquí; sus entregas valen $0'
+                              }
+                            >
+                              {p.refunded_at ? 'Prepago anulado' : 'Prepago'}
+                            </span>
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2 text-slate-600">
+                            {p.payments
+                              .map((x) => PAYMENT_LABELS[x.method])
+                              .join(' + ') || '—'}
+                          </td>
+                        </tr>
+                      )
+                    }
+                    const o = row.order
                     const itemCount = o.items.reduce(
                       (s, it) => s + it.quantity,
                       0
                     )
+                    const fromPrepaid = o.items.some((it) => it.prepayment_id)
                     return (
                       <tr
-                        key={o.id}
+                        key={row.key}
                         className="border-b border-slate-100 last:border-0 [&>td]:text-center"
                       >
                         <td className="whitespace-nowrap px-3 py-2 text-slate-500">
@@ -480,16 +661,26 @@ export default function OrdersReportPage() {
                           {formatMoney(o.total)}
                         </td>
                         <td className="px-3 py-2">
-                          <div className="flex justify-center">
+                          <div className="flex flex-col items-center gap-1">
                             <StatusBadge status={o.status} />
+                            {fromPrepaid && (
+                              <span
+                                className="rounded bg-violet-100 px-1.5 py-0.5 text-[11px] font-medium text-violet-700"
+                                title="Entrega que sale de un prepago: lo prepagado no se cobra aquí"
+                              >
+                                De prepago
+                              </span>
+                            )}
                           </div>
                         </td>
                         <td className="whitespace-nowrap px-3 py-2 text-slate-600">
-                          {o.paid
-                            ? orderPaymentList(o)
-                                .map((p) => PAYMENT_LABELS[p.method])
-                                .join(' + ')
-                            : '—'}
+                          {isFullyPrepaid(o)
+                            ? 'Prepago'
+                            : o.paid
+                              ? orderPaymentList(o)
+                                  .map((p) => PAYMENT_LABELS[p.method])
+                                  .join(' + ')
+                              : '—'}
                         </td>
                       </tr>
                     )
@@ -511,24 +702,56 @@ export default function OrdersReportPage() {
   )
 }
 
+/** Monto de un prepago pagado con un método específico. */
+function prepaidWithMethod(p: Prepayment, method: PaymentMethod): number {
+  return p.payments
+    .filter((x) => x.method === method)
+    .reduce((s, x) => s + Number(x.amount), 0)
+}
+
+const prepaymentClientName = (p: Prepayment) =>
+  p.client ? `${p.client.name} ${p.client.surname}`.trim() : 'Cliente'
+
 // ============================================================================
-//  Flujo de caja: ingresos (pedidos pagados) vs egresos (costos), por fecha.
+//  Flujo de caja: ingresos (pedidos pagados + prepagos) vs egresos (costos +
+//  devoluciones de prepagos), por fecha.
 // ============================================================================
 function CashFlowTab({
-  orders,
-  costs,
+  prepayments,
   companyName,
   registerExporter,
 }: {
-  orders: OrderDetail[]
-  costs: CostWithCategory[]
+  prepayments: Prepayment[]
   companyName?: string
   registerExporter: (fn: (() => void) | null) => void
 }) {
-  const [fromDate, setFromDate] = useState('')
-  const [toDate, setToDate] = useState('')
+  // Rango: arranca en el mes actual y se filtra EN EL SERVIDOR (ahorro de egress).
+  const [defaultRange] = useState(currentMonthRange)
+  const [fromDate, setFromDate] = useState(defaultRange.from)
+  const [toDate, setToDate] = useState(defaultRange.to)
+  const range = { from: fromDate, to: toDate }
   // Mostrar los pedidos aún NO pagados (por cobrar). Apagado por defecto.
   const [showUnpaid, setShowUnpaid] = useState(false)
+
+  const ordersQuery = useQuery({
+    queryKey: ['orders', 'report', range],
+    queryFn: () => listOrders(range),
+    placeholderData: keepPreviousData,
+  })
+  const costsQuery = useQuery({
+    queryKey: ['costs', range],
+    queryFn: () => listCosts(range),
+    placeholderData: keepPreviousData,
+  })
+  // "Por cobrar" = TODAS las deudas pendientes, sin importar la fecha: las
+  // deudas de meses anteriores no deben desaparecer por el rango.
+  const unpaidQuery = useQuery({
+    queryKey: ['orders', 'unpaid'],
+    queryFn: listUnpaidOrders,
+    enabled: showUnpaid,
+  })
+  const orders = useMemo(() => ordersQuery.data ?? [], [ordersQuery.data])
+  const costs = useMemo(() => costsQuery.data ?? [], [costsQuery.data])
 
   const income = useMemo(() => {
     let efectivo = 0
@@ -549,6 +772,20 @@ function CashFlowTab({
       // Cualquier remanente sin método (pedidos antiguos) va a "otros".
       otros += Math.max(0, Number(o.paid_amount ?? o.total) - (e + t + k))
     }
+    // Prepagos: el ingreso cuenta en su FECHA DE PAGO (aunque después se
+    // anule: la devolución se registra aparte, en su propia fecha).
+    for (const p of prepayments) {
+      const date = toLocalDateStr(p.paid_at)
+      if (fromDate && date < fromDate) continue
+      if (toDate && date > toDate) continue
+      const e = prepaidWithMethod(p, 'efectivo')
+      const t = prepaidWithMethod(p, 'transferencia')
+      const k = prepaidWithMethod(p, 'tarjeta')
+      efectivo += e
+      transferencia += t
+      tarjeta += k
+      otros += Math.max(0, Number(p.total) - (e + t + k))
+    }
     return {
       efectivo,
       transferencia,
@@ -556,7 +793,23 @@ function CashFlowTab({
       otros,
       total: efectivo + transferencia + tarjeta + otros,
     }
-  }, [orders, fromDate, toDate])
+  }, [orders, prepayments, fromDate, toDate])
+
+  // Devoluciones de prepagos anulados: egreso en la FECHA DE LA DEVOLUCIÓN.
+  const refunds = useMemo(() => {
+    const rows: { id: string; date: string; name: string; amount: number }[] = []
+    let total = 0
+    for (const p of prepayments) {
+      if (!p.refunded_at) continue
+      const date = toLocalDateStr(p.refunded_at)
+      if (fromDate && date < fromDate) continue
+      if (toDate && date > toDate) continue
+      const amount = Number(p.refund_amount ?? p.total)
+      rows.push({ id: p.id, date, name: prepaymentClientName(p), amount })
+      total += amount
+    }
+    return { rows, total }
+  }, [prepayments, fromDate, toDate])
 
   const expense = useMemo(() => {
     const byCat = new Map<string, number>()
@@ -569,23 +822,25 @@ function CashFlowTab({
       byCat.set(cat, (byCat.get(cat) ?? 0) + amt)
       total += amt
     }
+    if (refunds.total > 0) {
+      byCat.set('Devoluciones de prepagos', refunds.total)
+      total += refunds.total
+    }
     const rows = Array.from(byCat, ([name, amount]) => ({ name, amount })).sort(
       (a, b) => b.amount - a.amount
     )
     return { rows, total }
-  }, [costs, fromDate, toDate])
+  }, [costs, refunds, fromDate, toDate])
 
   const balance = income.total - expense.total
 
-  // Pedidos aún no pagados (por cobrar) dentro del rango, por fecha de creación.
+  // Pedidos aún no pagados (por cobrar): TODOS, sin importar el rango.
   const unpaid = useMemo(() => {
     const rows: { id: string; date: string; name: string; total: number }[] = []
     let total = 0
-    for (const o of orders) {
+    for (const o of unpaidQuery.data ?? []) {
       if (o.paid) continue
       const date = toLocalDateStr(o.created_at)
-      if (fromDate && date < fromDate) continue
-      if (toDate && date > toDate) continue
       rows.push({
         id: o.id,
         date,
@@ -596,7 +851,7 @@ function CashFlowTab({
     }
     rows.sort((a, b) => a.date.localeCompare(b.date))
     return { rows, total }
-  }, [orders, fromDate, toDate])
+  }, [unpaidQuery.data])
 
   function exportPdf() {
     const periodo =
@@ -616,7 +871,7 @@ function CashFlowTab({
         ['Egresos (costos)', formatMoney(expense.total)],
         ['Balance', formatMoney(balance)],
         ...(showUnpaid
-          ? [['Por cobrar (no pagado)', formatMoney(unpaid.total)]]
+          ? [['Por cobrar (todas las deudas)', formatMoney(unpaid.total)]]
           : []),
       ],
       { title: 'Resumen' }
@@ -638,7 +893,7 @@ function CashFlowTab({
       r,
       ['Categoría', 'Monto'],
       expense.rows.map((x) => [x.name, formatMoney(x.amount)]),
-      { title: 'Costos por categoría' }
+      { title: 'Egresos por categoría' }
     )
 
     // Detalle de movimientos (ingresos + costos) ordenado por fecha.
@@ -647,6 +902,8 @@ function CashFlowTab({
     const movimientos: Mov[] = []
     for (const o of orders) {
       if (!o.paid) continue
+      // Entregas 100% prepagadas ($0): su ingreso ya está en el prepago.
+      if (Number(o.paid_amount ?? o.total) === 0) continue
       const date = toLocalDateStr(o.created_at)
       if (fromDate && date < fromDate) continue
       if (toDate && date > toDate) continue
@@ -659,6 +916,28 @@ function CashFlowTab({
         tipo: 'Ingreso',
         detalle: `${orderClientName(o)} · ${metodo}`,
         monto: formatMoney(Number(o.paid_amount ?? o.total)),
+      })
+    }
+    for (const p of prepayments) {
+      const date = toLocalDateStr(p.paid_at)
+      if (fromDate && date < fromDate) continue
+      if (toDate && date > toDate) continue
+      const metodo =
+        p.payments.map((x) => PAYMENT_LABELS[x.method]).join(' + ') ||
+        'Sin método'
+      movimientos.push({
+        date,
+        tipo: 'Ingreso',
+        detalle: `Prepago · ${prepaymentClientName(p)} · ${metodo}`,
+        monto: formatMoney(Number(p.total)),
+      })
+    }
+    for (const r of refunds.rows) {
+      movimientos.push({
+        date: r.date,
+        tipo: 'Egreso',
+        detalle: `Devolución prepago · ${r.name}`,
+        monto: `- ${formatMoney(r.amount)}`,
       })
     }
     for (const c of costs) {
@@ -684,7 +963,7 @@ function CashFlowTab({
         r,
         ['Fecha', 'Cliente', 'Monto'],
         unpaid.rows.map((x) => [short(x.date), x.name, formatMoney(x.total)]),
-        { title: 'Pedidos por cobrar' }
+        { title: 'Pedidos por cobrar (todas las deudas pendientes)' }
       )
     }
 
@@ -716,17 +995,18 @@ function CashFlowTab({
             setToDate(t)
           }}
           label="Fecha"
+          presets
         />
-        {(fromDate || toDate) && (
+        {!sameRange(range, defaultRange) && (
           <Button
             variant="ghost"
             className="mt-2"
             onClick={() => {
-              setFromDate('')
-              setToDate('')
+              setFromDate(defaultRange.from)
+              setToDate(defaultRange.to)
             }}
           >
-            Limpiar
+            Volver al mes actual
           </Button>
         )}
 
@@ -746,7 +1026,7 @@ function CashFlowTab({
               }`}
             />
           </button>
-          <span>Mostrar pedidos por cobrar (no pagados)</span>
+          <span>Mostrar pedidos por cobrar (todas las deudas, sin importar la fecha)</span>
         </label>
       </Card>
 
@@ -760,13 +1040,13 @@ function CashFlowTab({
           label="Ingresos"
           value={income.total}
           tone="green"
-          hint="Total de los pedidos marcados como Pagado (efectivo + transferencia) dentro del rango de fechas."
+          hint="Pedidos marcados como Pagado más los prepagos (en su fecha de pago), dentro del rango de fechas."
         />
         <KpiCard
           label="Egresos (costos)"
           value={expense.total}
           tone="red"
-          hint="Suma de todos los costos de la empresa registrados dentro del rango de fechas."
+          hint="Costos de la empresa más las devoluciones de prepagos anulados (en su fecha de devolución), dentro del rango de fechas."
         />
         <KpiCard
           label="Balance"
@@ -779,7 +1059,7 @@ function CashFlowTab({
             label="Por cobrar"
             value={unpaid.total}
             tone="amber"
-            hint="Total de los pedidos aún NO pagados dentro del rango de fechas. No entra en el balance (todavía no es dinero recibido)."
+            hint="Total de TODOS los pedidos aún NO pagados, de cualquier fecha (las deudas antiguas no se esconden por el rango). No entra en el balance (todavía no es dinero recibido)."
           />
         )}
       </div>
@@ -792,7 +1072,7 @@ function CashFlowTab({
           </h3>
           {income.total === 0 ? (
             <p className="text-sm text-slate-500">
-              Sin pedidos pagados en el período.
+              Sin ingresos en el período.
             </p>
           ) : (
             <div className="space-y-3">
@@ -834,7 +1114,7 @@ function CashFlowTab({
 
         <Card className="p-4">
           <h3 className="mb-3 flex items-center gap-2 font-semibold text-slate-900">
-            <span aria-hidden>🧾</span> Costos por categoría
+            <span aria-hidden>🧾</span> Egresos por categoría
           </h3>
           {expense.rows.length === 0 ? (
             <p className="text-sm text-slate-500">Sin costos en el período.</p>
@@ -867,7 +1147,7 @@ function CashFlowTab({
           </h3>
           {unpaid.rows.length === 0 ? (
             <p className="text-sm text-slate-500">
-              No hay pedidos por cobrar en el período.
+              No hay pedidos por cobrar.
             </p>
           ) : (
             <div className="space-y-1.5">
@@ -963,16 +1243,12 @@ function BreakdownRow({
 //  desde un filtro. No muestra nada hasta seleccionar un repartidor.
 // ============================================================================
 function RepartidoresTab({
-  orders,
-  costs,
   products,
   supplies,
   drivers,
   companyName,
   registerExporter,
 }: {
-  orders: OrderDetail[]
-  costs: CostWithCategory[]
   products: Product[]
   supplies: Supply[]
   drivers: Driver[]
@@ -980,8 +1256,33 @@ function RepartidoresTab({
   registerExporter: (fn: (() => void) | null) => void
 }) {
   const [driverId, setDriverId] = useState('')
-  const [fromDate, setFromDate] = useState('')
-  const [toDate, setToDate] = useState('')
+  // Rango de FECHA DE RUTA: arranca en el mes actual y se filtra EN EL
+  // SERVIDOR (ahorro de egress). Los datos se piden sólo al elegir repartidor.
+  const [defaultRange] = useState(currentMonthRange)
+  const [fromDate, setFromDate] = useState(defaultRange.from)
+  const [toDate, setToDate] = useState(defaultRange.to)
+  const range = { from: fromDate, to: toDate }
+  const hasRange = Boolean(fromDate || toDate)
+
+  // Con rango: pedidos de las rutas de esas fechas. Sin rango: todos (incluye
+  // pedidos fuera de ruta, igual que antes).
+  const ordersQuery = useQuery({
+    queryKey: hasRange
+      ? ['orders', 'by-route-date', range]
+      : ['orders', 'report', ALL_TIME],
+    queryFn: () =>
+      hasRange ? listOrdersByRouteDate(range) : listOrders(ALL_TIME),
+    enabled: Boolean(driverId),
+    placeholderData: keepPreviousData,
+  })
+  const costsQuery = useQuery({
+    queryKey: ['costs', range],
+    queryFn: () => listCosts(range),
+    enabled: Boolean(driverId),
+    placeholderData: keepPreviousData,
+  })
+  const orders = useMemo(() => ordersQuery.data ?? [], [ordersQuery.data])
+  const costs = useMemo(() => costsQuery.data ?? [], [costsQuery.data])
 
   const productSupply = useMemo(() => {
     const m = new Map<string, { supply_id: string; quantity: number }[]>()
@@ -1134,6 +1435,7 @@ function RepartidoresTab({
             }}
             label="Fecha de la ruta"
             hint="Se filtra por la fecha de la ruta en que se entregó el pedido (coincide con la Carga de la ruta y Entregas)."
+            presets
           />
         </div>
       </Card>
