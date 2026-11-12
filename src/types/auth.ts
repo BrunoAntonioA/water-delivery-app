@@ -30,6 +30,7 @@ export type ModuleKey =
   | 'usuarios'
   | 'suscripcion'
   | 'empresas'
+  | 'suscripciones'
   | 'planes'
 
 // Módulos "de cuenta": siempre visibles para quien tenga el rol, sin depender
@@ -38,7 +39,7 @@ export const ALWAYS_ON_MODULES: ModuleKey[] = ['suscripcion']
 
 // Qué módulos puede ver cada rol.
 export const ROLE_MODULES: Record<Role, ModuleKey[]> = {
-  superadmin: ['empresas', 'planes'],
+  superadmin: ['empresas', 'suscripciones', 'planes'],
   admin: [
     'pedidos',
     'reportes',
@@ -101,6 +102,7 @@ export const MODULE_LABELS: Record<ModuleKey, string> = {
   usuarios: 'Usuarios',
   suscripcion: 'Suscripción',
   empresas: 'Empresas',
+  suscripciones: 'Suscripciones',
   planes: 'Planes',
 }
 

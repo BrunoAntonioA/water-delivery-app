@@ -90,6 +90,40 @@ export async function getCompanySubscription(
   return (data as Subscription | null) ?? null
 }
 
+/** Fila del listado de suscripciones del superadmin (con empresa y plan). */
+export interface SubscriptionOverview {
+  id: string
+  company_id: string
+  status: SubscriptionStatus
+  access_until: string | null
+  activated_at: string | null
+  custom_price: number | null
+  plan: Pick<Plan, 'id' | 'name' | 'price'> | null
+  company: { id: string; name: string } | null
+}
+
+/**
+ * Todas las suscripciones con su empresa y plan (sólo superadmin, por RLS). Se
+ * traen sólo las columnas que usa el listado para mantener bajo el egress.
+ */
+export async function listAllSubscriptions(): Promise<SubscriptionOverview[]> {
+  const { data, error } = await supabase
+    .from('subscriptions')
+    .select(
+      'id, company_id, status, access_until, activated_at, custom_price, plan:plans(id, name, price), company:companies(id, name)'
+    )
+  if (error) throw error
+  return (data ?? []) as unknown as SubscriptionOverview[]
+}
+
+/** Monto mensual que se le cobra: el precio especial o, si no hay, el del plan. */
+export function monthlyCharge(
+  sub: Pick<SubscriptionOverview, 'custom_price' | 'plan'>
+): number | null {
+  if (sub.custom_price != null) return Number(sub.custom_price)
+  return sub.plan ? Number(sub.plan.price) : null
+}
+
 export interface SubscriptionPatch {
   plan_id?: string | null
   status?: SubscriptionStatus

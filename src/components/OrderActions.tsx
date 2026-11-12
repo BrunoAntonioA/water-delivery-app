@@ -97,6 +97,8 @@ export function OrderActions({
       setDeliverOpen(false)
       patchOrderInCaches(qc, order.id, {
         status: 'delivered',
+        // Hora provisoria; al refrescar llega la del servidor.
+        delivered_at: new Date().toISOString(),
         ...(vars.payments?.length ? { paid: true } : {}),
       })
     },

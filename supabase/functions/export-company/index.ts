@@ -97,14 +97,27 @@ async function handle(req: Request): Promise<Response> {
   if (!company) return json({ error: 'Empresa no encontrada' }, 404)
 
   // 4) Traer las tablas seleccionadas filtrando por company_id.
+  // PostgREST corta cada respuesta en 1000 filas (max-rows), también con el
+  // service role: se pagina con .range() hasta que un lote venga incompleto.
+  // Se ordena por id (PK uuid en todas las tablas de TABLES) para que las
+  // páginas no se solapen ni se salten filas.
+  const PAGE = 1000
   const tables: Record<string, unknown[]> = {}
   for (const t of selectedTables) {
-    const { data, error } = await admin
-      .from(t)
-      .select('*')
-      .eq('company_id', companyId)
-    if (error) return json({ error: `Error en ${t}: ${error.message}` }, 500)
-    tables[t] = data ?? []
+    const rows: unknown[] = []
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await admin
+        .from(t)
+        .select('*')
+        .eq('company_id', companyId)
+        .order('id')
+        .range(from, from + PAGE - 1)
+      if (error) return json({ error: `Error en ${t}: ${error.message}` }, 500)
+      const batch = data ?? []
+      rows.push(...batch)
+      if (batch.length < PAGE) break
+    }
+    tables[t] = rows
   }
 
   return json({

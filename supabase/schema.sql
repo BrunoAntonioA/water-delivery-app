@@ -220,6 +220,32 @@ alter table orders add column if not exists delivered_at timestamptz;
 update orders set delivered_at = created_at
   where status = 'delivered' and delivered_at is null;
 
+-- La fecha/hora de entrega la pone el SERVIDOR (now()), no el reloj del
+-- dispositivo: al pasar a 'delivered' se fija now(); si el pedido sigue
+-- entregado se conserva la ya guardada; al deshacer la entrega se limpia. Sólo
+-- actúa en inserts/updates nuevos: no modifica los pedidos ya existentes. En un
+-- INSERT se respeta una fecha explícita (p. ej. al restaurar un respaldo).
+create or replace function public.set_order_delivered_at()
+returns trigger language plpgsql set search_path = public as $$
+begin
+  if new.status = 'delivered' then
+    if TG_OP = 'INSERT' then
+      new.delivered_at := coalesce(new.delivered_at, now());
+    elsif old.status is distinct from 'delivered' then
+      new.delivered_at := now();
+    else
+      new.delivered_at := old.delivered_at;
+    end if;
+  else
+    new.delivered_at := null;
+  end if;
+  return new;
+end$$;
+
+drop trigger if exists orders_delivered_at on orders;
+create trigger orders_delivered_at before insert or update on orders
+  for each row execute function public.set_order_delivered_at();
+
 -- El PAGO ahora es independiente del estado de entrega: un pedido puede estar
 -- pagado sin haber sido entregado (y viceversa). "status" queda sólo para la
 -- entrega ('ordered' | 'delivered'); el valor 'paid' del enum se deja de usar.

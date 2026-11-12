@@ -25,6 +25,7 @@ function useTrialModules(): ModuleKey[] | undefined {
 }
 import { Button, Spinner } from './components/ui'
 import { BillingWall } from './components/BillingWall'
+import { MembershipBadge } from './components/MembershipBadge'
 import ClientsPage from './pages/ClientsPage'
 import ProductsPage from './pages/ProductsPage'
 import OrdersPage from './pages/OrdersPage'
@@ -42,6 +43,7 @@ import UsersPage from './pages/UsersPage'
 import CompaniesPage from './pages/CompaniesPage'
 import PlansPage from './pages/PlansPage'
 import SubscriptionPage from './pages/SubscriptionPage'
+import SubscriptionsPage from './pages/SubscriptionsPage'
 import SignupPage from './pages/SignupPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
 import LoginPage from './pages/LoginPage'
@@ -68,6 +70,7 @@ const NAV: {
   { module: 'usuarios', to: '/usuarios', label: 'Usuarios', icon: '🔑' },
   { module: 'suscripcion', to: '/suscripcion', label: 'Suscripción', icon: '💳' },
   { module: 'empresas', to: '/empresas', label: 'Empresas', icon: '🏢' },
+  { module: 'suscripciones', to: '/suscripciones', label: 'Suscripciones', icon: '💰' },
   { module: 'planes', to: '/planes', label: 'Planes', icon: '🏷️' },
 ]
 
@@ -293,6 +296,10 @@ export default function App() {
                 </span>
               </span>
             )}
+            {/* Membresía de la empresa (el superadmin no tiene) */}
+            {profile.role !== 'superadmin' && subscription && (
+              <MembershipBadge subscription={subscription} />
+            )}
             <div className="hidden text-right sm:block">
               <p className="font-medium text-slate-700">
                 {profile.full_name || profile.email}
@@ -448,6 +455,14 @@ export default function App() {
             element={
               <Protected module="empresas" home={home}>
                 <CompanyDetailPage />
+              </Protected>
+            }
+          />
+          <Route
+            path="/suscripciones"
+            element={
+              <Protected module="suscripciones" home={home}>
+                <SubscriptionsPage />
               </Protected>
             }
           />

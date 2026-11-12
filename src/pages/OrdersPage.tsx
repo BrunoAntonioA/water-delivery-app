@@ -45,6 +45,7 @@ import {
   formatDateShort,
   formatMoney,
   formatTimePart,
+  toLocalDateStr,
 } from '../lib/format'
 import { useIsMobile } from '../lib/useIsMobile'
 import { useOnlineStatus } from '../lib/useOnlineStatus'
@@ -1433,6 +1434,23 @@ function OrderRow({
       </td>
       <td className="w-16 whitespace-nowrap px-2 py-2 text-center text-slate-600">
         {o.routeDate ? formatDateShort(o.routeDate) : '—'}
+        {/* Entregado: hora de entrega (la fija el servidor) bajo la fecha */}
+        {o.status === 'delivered' && o.delivered_at && (
+          <div className="mt-0.5 text-xs text-slate-400">
+            <span className="group relative inline-block cursor-default">
+              {formatTimePart(o.delivered_at)}
+              <span
+                role="tooltip"
+                className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-1 hidden -translate-x-1/2 whitespace-nowrap rounded-lg bg-slate-800 px-2.5 py-1.5 text-xs text-white shadow-lg group-hover:block"
+              >
+                Hora de entrega
+                {o.routeDate && toLocalDateStr(o.delivered_at) !== o.routeDate
+                  ? ` · ${formatDatePart(o.delivered_at)}`
+                  : ''}
+              </span>
+            </span>
+          </div>
+        )}
       </td>
       <td className="px-3 py-2 text-slate-600">
         <OrderItemsList items={o.items} />

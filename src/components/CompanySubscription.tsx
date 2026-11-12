@@ -35,7 +35,14 @@ const STATUS_CLASS: Record<string, string> = {
  * asignar plan, iniciar prueba, activar (manual), pausar o cancelar. El pago
  * automático (Flow) llega en una fase posterior.
  */
-export function CompanySubscription({ companyId }: { companyId: string }) {
+export function CompanySubscription({
+  companyId,
+  defaultOpen = false,
+}: {
+  companyId: string
+  /** Abre de entrada las tarjetas de plan y de pagos. */
+  defaultOpen?: boolean
+}) {
   const qc = useQueryClient()
   const { data: plans } = useQuery({ queryKey: ['plans'], queryFn: listPlans })
   const { data: sub, isLoading } = useQuery({
@@ -48,6 +55,7 @@ export function CompanySubscription({ companyId }: { companyId: string }) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['subscription', companyId] })
       qc.invalidateQueries({ queryKey: ['company', companyId] })
+      qc.invalidateQueries({ queryKey: ['subscriptions-overview'] })
     },
   })
 
@@ -126,6 +134,7 @@ export function CompanySubscription({ companyId }: { companyId: string }) {
     <CollapsibleCard
       title="Plan y suscripción"
       subtitle="Asigna el plan y administra el acceso de la empresa (activación manual)."
+      defaultOpen={defaultOpen}
       right={
         <span
           className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
@@ -319,6 +328,7 @@ export function CompanySubscription({ companyId }: { companyId: string }) {
     <CollapsibleCard
       title="Pagos registrados"
       subtitle="Registra manualmente los pagos recibidos. La empresa los ve en su módulo de Suscripción."
+      defaultOpen={defaultOpen}
     >
 
       <form

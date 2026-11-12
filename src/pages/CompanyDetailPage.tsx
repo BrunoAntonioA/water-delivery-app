@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useLocation, useParams } from 'react-router-dom'
 import { getCompany, updateCompanyModules } from '../api/admin'
 import { getCompanySubscription } from '../api/billing'
 import { COMPANY_MODULES, MODULE_LABELS, type ModuleKey } from '../types/auth'
@@ -17,6 +17,13 @@ import {
 export default function CompanyDetailPage() {
   const { id = '' } = useParams()
   const qc = useQueryClient()
+  // Si se llegó desde el listado de Suscripciones, se vuelve allí y se muestran
+  // abiertos el plan y los pagos registrados.
+  const fromSubscriptions =
+    (useLocation().state as { from?: string } | null)?.from === 'suscripciones'
+  const back = fromSubscriptions
+    ? { to: '/suscripciones', label: '← Volver a suscripciones' }
+    : { to: '/empresas', label: '← Volver a empresas' }
   const { data: company, isLoading } = useQuery({
     queryKey: ['company', id],
     queryFn: () => getCompany(id),
@@ -43,7 +50,7 @@ export default function CompanyDetailPage() {
     return (
       <EmptyState>
         No se encontró la empresa.{' '}
-        <Link to="/empresas" className="text-sky-600 hover:underline">
+        <Link to={back.to} className="text-sky-600 hover:underline">
           Volver
         </Link>
       </EmptyState>
@@ -65,14 +72,17 @@ export default function CompanyDetailPage() {
   return (
     <div>
       <Link
-        to="/empresas"
+        to={back.to}
         className="mb-4 inline-block text-sm text-sky-600 hover:underline"
       >
-        ← Volver a empresas
+        {back.label}
       </Link>
       <PageHeader title={company.name} subtitle="Plan, módulos y usuarios de esta empresa." />
 
-      <CompanySubscription companyId={company.id} />
+      <CompanySubscription
+        companyId={company.id}
+        defaultOpen={fromSubscriptions}
+      />
 
       {planModules ? (
         <CollapsibleCard

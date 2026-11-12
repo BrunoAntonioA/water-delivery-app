@@ -296,6 +296,8 @@ export async function markOrderDelivered(
     status: 'delivered',
     returned_supplies: returnedSupplies,
     returned_bidones: totalReturned,
+    // Respaldo: el trigger orders_delivered_at lo reemplaza por la hora del
+    // servidor (now()), así que no depende del reloj del dispositivo.
     delivered_at: new Date().toISOString(),
   }
   // Método acordado (o principal si ya pagó con el desglose).
